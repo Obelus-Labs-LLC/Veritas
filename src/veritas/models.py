@@ -92,8 +92,8 @@ class EvidenceSuggestion:
     claim_id: str = ""
     url: str = ""
     title: str = ""
-    source_name: str = ""  # crossref|arxiv|pubmed|sec_edgar|yfinance|wikipedia|fred
-    evidence_type: str = "other"  # primary|secondary|dataset|filing|gov|paper|other
+    source_name: str = ""  # crossref|arxiv|pubmed|sec_edgar|yfinance|wikipedia|fred|google_factcheck
+    evidence_type: str = "other"  # primary|secondary|dataset|filing|gov|paper|factcheck|other
     score: int = 0  # 0-100
     signals: str = ""  # pipe-delimited explainability signals
     snippet: str = ""  # optional short excerpt

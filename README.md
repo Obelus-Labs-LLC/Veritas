@@ -56,8 +56,9 @@ All free. No API keys required.
 | **arXiv** | `paper` | AI/ML, physics, mathematics, computer science preprints |
 | **PubMed** | `paper` | Biomedical and health research (PMID-linked) |
 | **Wikipedia** | `secondary` | Named entity context, background reference |
+| **Google Fact Check** | `factcheck` | Verified fact-checks from PolitiFact, Snopes, Full Fact, AFP, Reuters, and hundreds of IFCN-certified publishers worldwide |
 
-Smart routing analyzes claim content and boosts the most relevant sources. A claim mentioning "Alphabet revenue" gets routed to yfinance and SEC EDGAR first. A claim about "LDL cholesterol" gets routed to PubMed.
+Smart routing analyzes claim content and boosts the most relevant sources. A claim mentioning "Alphabet revenue" gets routed to yfinance and SEC EDGAR first. A claim about "LDL cholesterol" gets routed to PubMed. Political and public-figure claims get routed to Google Fact Check first.
 
 ---
 
@@ -79,8 +80,8 @@ Veritas doesn't just verify individual claims — it tracks how claims move acro
 | Ingested sources | 21 |
 | Extracted claims | 3,538 |
 | Evidence suggestions gathered | 9,225 |
-| Evidence sources | 7 (SEC EDGAR, yfinance, FRED, Crossref, arXiv, PubMed, Wikipedia) |
-| Passing tests | 204 |
+| Evidence sources | 8 (SEC EDGAR, yfinance, FRED, Crossref, arXiv, PubMed, Wikipedia, Google Fact Check) |
+| Passing tests | 229 |
 | Claim categories | 7 (finance, health, science, tech, politics, military, general) |
 
 ### Benchmark Results
@@ -109,7 +110,7 @@ Verification rates are deliberately conservative. The scoring thresholds are str
 | NLP | Rule-based (no external NLP libraries) |
 | Evidence APIs | requests (all free, no keys) |
 | GPU support | NVIDIA CUDA 12 via pip (nvidia-cublas-cu12, nvidia-cudnn-cu12) |
-| Testing | pytest (204 tests) |
+| Testing | pytest (229 tests) |
 
 ---
 
@@ -198,7 +199,7 @@ pip install pytest
 pytest tests/ -v
 ```
 
-204 tests across 8 test files. Tests use fixture transcripts — no network calls or GPU required.
+229 tests across 9 test files. Tests use fixture transcripts — no network calls or GPU required.
 
 ---
 
@@ -213,20 +214,21 @@ veritas-app/
 │   ├── claim_extract.py    # Deterministic claim extraction
 │   ├── assist.py           # Smart routing + evidence orchestration
 │   ├── scoring.py          # Rule-based evidence scoring
-│   ├── evidence_sources/   # 7 free API integrations
+│   ├── evidence_sources/   # 8 free API integrations
 │   │   ├── crossref.py
 │   │   ├── arxiv.py
 │   │   ├── pubmed.py
 │   │   ├── sec_edgar.py
 │   │   ├── yfinance_source.py
 │   │   ├── fred_source.py
-│   │   └── wikipedia_source.py
+│   │   ├── wikipedia_source.py
+│   │   └── google_factcheck.py
 │   ├── db.py               # SQLite schema + migrations
 │   ├── models.py           # Data models
 │   ├── config.py           # Constants and paths
 │   ├── export.py           # Markdown/JSON brief generation
 │   └── search.py           # Full-text claim search
-├── tests/                  # 204 tests
+├── tests/                  # 229 tests
 ├── data/                   # Local data (gitignored)
 │   ├── raw/                # Downloaded audio
 │   ├── transcripts/        # Whisper output

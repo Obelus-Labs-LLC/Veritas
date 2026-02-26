@@ -7,6 +7,7 @@ from .sec_edgar import search_sec_edgar
 from .yfinance_source import search_yfinance
 from .wikipedia_source import search_wikipedia
 from .fred_source import search_fred
+from .google_factcheck import search_google_factcheck
 
 ALL_SOURCES = [
     ("crossref", search_crossref),
@@ -16,4 +17,5 @@ ALL_SOURCES = [
     ("yfinance", search_yfinance),
     ("wikipedia", search_wikipedia),
     ("fred", search_fred),
+    ("google_factcheck", search_google_factcheck),
 ]

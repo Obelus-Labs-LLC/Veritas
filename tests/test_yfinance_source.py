@@ -336,9 +336,9 @@ def test_yfinance_in_all_sources():
 
 
 def test_all_sources_count():
-    """Should have 7 evidence sources total."""
+    """Should have 8 evidence sources total."""
     from veritas.evidence_sources import ALL_SOURCES
-    assert len(ALL_SOURCES) == 7
+    assert len(ALL_SOURCES) == 8
 
 
 def test_yfinance_in_finance_category():

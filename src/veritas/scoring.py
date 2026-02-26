@@ -143,6 +143,9 @@ def score_evidence(
     if evidence_type in ("paper", "filing", "gov", "dataset"):
         score += 15
         signals.append(f"primary_source:{evidence_type}")
+    elif evidence_type == "factcheck":
+        score += 15
+        signals.append("factcheck_source")
     elif evidence_type == "secondary":
         score += 5
         signals.append("secondary_source")
@@ -251,7 +254,7 @@ def compute_auto_status(
     has_token_overlap = any(s.startswith("token_overlap") for s in signal_set)
     has_keyphrase = any(s.startswith("keyphrase_hit") for s in signal_set)
     has_exact_number = any(s.startswith("number_exact_match") for s in signal_set)
-    is_primary = best_evidence_type in ("paper", "filing", "gov", "dataset")
+    is_primary = best_evidence_type in ("paper", "filing", "gov", "dataset", "factcheck")
 
     # SUPPORTED: strict guardrails
     # For filings with exact number matches, keyphrase is less critical

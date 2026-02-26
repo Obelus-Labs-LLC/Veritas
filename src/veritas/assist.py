@@ -2,7 +2,7 @@
 
 Pipeline for each claim:
   1. Generate search queries from claim text
-  2. Hit free structured APIs (Crossref, arXiv, PubMed, SEC EDGAR, yfinance, Wikipedia, FRED)
+  2. Hit free structured APIs (Crossref, arXiv, PubMed, SEC EDGAR, yfinance, Wikipedia, FRED, Google Fact Check)
   3. Score each result against the claim
   4. Store top N as evidence_suggestions
   5. Optionally set status_auto if guardrails pass
@@ -164,6 +164,24 @@ def _smart_select_sources(
         if "wikipedia" in boosts:
             boosts["wikipedia"] += 6
 
+    # Signal 7: Political / public-figure claims → boost google_factcheck
+    # Fact-checkers cover political statements, viral claims, health misinformation
+    _FACTCHECK_TERMS = frozenset({
+        "president", "congress", "senator", "representative",
+        "government", "administration", "white house", "campaign",
+        "claimed", "claim", "said", "says", "stated", "according",
+        "false", "true", "misleading", "debunked",
+        "unemployment", "crime", "border", "immigration",
+        "vaccine", "covid", "pandemic",
+    })
+    fc_count = sum(1 for t in _FACTCHECK_TERMS if t in text_lower)
+    if fc_count >= 2:
+        if "google_factcheck" in boosts:
+            boosts["google_factcheck"] += 10
+    elif fc_count >= 1:
+        if "google_factcheck" in boosts:
+            boosts["google_factcheck"] += 5
+
     # Re-rank: sort by (boost descending, then preserve original order)
     indexed = [(name, fn, boosts.get(name, 0), i)
                for i, (name, fn) in enumerate(category_sources)]
@@ -183,13 +201,13 @@ def _select_sources_for_category(category: str) -> List[Tuple[str, Any]]:
     """
     # Map categories to preferred sources
     priority = {
-        "finance": ["yfinance", "sec_edgar", "fred", "crossref", "wikipedia"],
-        "health": ["pubmed", "crossref", "wikipedia"],
+        "finance": ["yfinance", "sec_edgar", "fred", "google_factcheck", "crossref", "wikipedia"],
+        "health": ["pubmed", "google_factcheck", "crossref", "wikipedia"],
         "science": ["arxiv", "crossref", "pubmed", "wikipedia"],
-        "tech": ["arxiv", "crossref", "wikipedia"],
-        "politics": ["crossref", "wikipedia"],
-        "military": ["crossref", "wikipedia"],
-        "general": ["wikipedia", "crossref", "arxiv"],
+        "tech": ["arxiv", "crossref", "google_factcheck", "wikipedia"],
+        "politics": ["google_factcheck", "crossref", "wikipedia"],
+        "military": ["google_factcheck", "crossref", "wikipedia"],
+        "general": ["google_factcheck", "wikipedia", "crossref", "arxiv"],
     }
     preferred = priority.get(category, ["crossref"])
 
