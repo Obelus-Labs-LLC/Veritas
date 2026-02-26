@@ -1,0 +1,14 @@
+# Core dependencies
+faster-whisper>=1.0.0
+yt-dlp>=2024.0.0
+
+# CLI
+click>=8.1.0
+
+# Utilities
+rich>=13.0.0
+requests>=2.31.0
+
+# GPU support (CUDA 12 runtime libs — no system CUDA toolkit needed)
+nvidia-cublas-cu12>=12.4.0
+nvidia-cudnn-cu12>=9.0.0

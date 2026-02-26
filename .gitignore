@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# User data and local artifacts (never commit)
+data/raw/
+data/transcripts/
+data/exports/
+data/cache/
+*.sqlite
+
+# Audio/media files
+*.mp3
+*.m4a
+*.wav
+*.opus
+*.ogg
+*.flac
+
+# Environment and secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp scripts (single underscore prefix, not __dunder__)
+_[!_]*.py

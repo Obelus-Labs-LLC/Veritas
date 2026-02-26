@@ -1,0 +1,45 @@
+{
+  "source_id": "test_source_01",
+  "engine": "faster-whisper",
+  "model": "small",
+  "device": "cpu",
+  "language": "en",
+  "language_probability": 0.98,
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 8.5,
+      "text": "The Federal Reserve announced a 25 basis point rate cut on January 15. This was widely expected by markets."
+    },
+    {
+      "start": 8.5,
+      "end": 18.2,
+      "text": "Goldman Sachs released a report showing that inflation has dropped to 2.3 percent. The data confirms a clear downward trend since March 2024."
+    },
+    {
+      "start": 18.2,
+      "end": 26.0,
+      "text": "Some analysts suggest this could lead to further easing. Others believe rates will hold steady through the summer."
+    },
+    {
+      "start": 26.0,
+      "end": 35.0,
+      "text": "Meanwhile unemployment remains at 3.7 percent, the lowest in decades. The labor market is showing remarkable resilience."
+    },
+    {
+      "start": 35.0,
+      "end": 42.0,
+      "text": "In other news the weather today is quite pleasant and many people are enjoying the outdoors."
+    },
+    {
+      "start": 42.0,
+      "end": 47.0,
+      "text": "The European Central Bank"
+    },
+    {
+      "start": 47.0,
+      "end": 53.0,
+      "text": "announced it will maintain current interest rates at 4.5 percent through the first quarter."
+    }
+  ]
+}
