@@ -276,7 +276,7 @@ def test_extracted_claims_have_hash_and_category():
     for c in claims:
         assert c.claim_hash, f"Claim missing hash: {c.text[:60]}"
         assert len(c.claim_hash) == 64, f"Hash wrong length: {c.claim_hash}"
-        assert c.category in ("finance", "tech", "politics", "health", "science", "military", "general"), \
+        assert c.category in ("finance", "tech", "politics", "health", "science", "military", "education", "energy_climate", "labor", "general"), \
             f"Invalid category: {c.category}"
 
 

@@ -170,3 +170,117 @@ def test_threshold_still_two():
     assert _classify_category(
         "He went to the market to buy groceries"
     ) == "general"
+
+
+# ── Education category ──
+
+
+def test_education_tuition():
+    """Tuition / student language should trigger education."""
+    assert _classify_category(
+        "College tuition has increased 1200 percent and student loans now exceed 1.7 trillion"
+    ) == "education"
+
+
+def test_education_enrollment():
+    """Enrollment / school language should trigger education."""
+    assert _classify_category(
+        "Enrollment in public schools dropped by 1.3 million students"
+    ) == "education"
+
+
+def test_education_graduation():
+    """Graduation / degree language should trigger education."""
+    assert _classify_category(
+        "The graduation rate for students with a bachelor degree has improved"
+    ) == "education"
+
+
+def test_education_teacher():
+    """Teacher / classroom language should trigger education."""
+    assert _classify_category(
+        "Teachers in the classroom are facing increased student-to-teacher ratios"
+    ) == "education"
+
+
+def test_education_test_scores():
+    """Test scores / literacy should trigger education."""
+    assert _classify_category(
+        "Standardized test scores show declining literacy among high school students"
+    ) == "education"
+
+
+# ── Energy / Climate category ──
+
+
+def test_energy_climate_carbon():
+    """Carbon emissions language should trigger energy_climate."""
+    assert _classify_category(
+        "Carbon emissions from fossil fuels reached record levels in 2023"
+    ) == "energy_climate"
+
+
+def test_energy_climate_renewable():
+    """Renewable energy language should trigger energy_climate."""
+    assert _classify_category(
+        "Solar and wind power now generate 30 percent of renewable energy"
+    ) == "energy_climate"
+
+
+def test_energy_climate_ev():
+    """Electric vehicle language should trigger energy_climate."""
+    assert _classify_category(
+        "Electric vehicle battery technology has improved sustainable transportation"
+    ) == "energy_climate"
+
+
+def test_energy_climate_warming():
+    """Climate change / temperature should trigger energy_climate."""
+    assert _classify_category(
+        "Global warming is causing temperature increases and sea level rise"
+    ) == "energy_climate"
+
+
+def test_energy_climate_pollution():
+    """Pollution / greenhouse should trigger energy_climate."""
+    assert _classify_category(
+        "Greenhouse gas pollution from methane and carbon continues to increase"
+    ) == "energy_climate"
+
+
+# ── Labor category ──
+
+
+def test_labor_unemployment():
+    """Unemployment / jobs language should trigger labor."""
+    assert _classify_category(
+        "Unemployment dropped and the labor force participation rate increased"
+    ) == "labor"
+
+
+def test_labor_wages():
+    """Wages / salary language should trigger labor."""
+    assert _classify_category(
+        "Minimum wage workers saw salary increases after the new labor policy"
+    ) == "labor"
+
+
+def test_labor_union():
+    """Union / strike language should trigger labor."""
+    assert _classify_category(
+        "The union organized a strike for better wages and collective bargaining"
+    ) == "labor"
+
+
+def test_labor_gig_economy():
+    """Gig economy / remote work should trigger labor."""
+    assert _classify_category(
+        "Remote work and the gig economy have transformed the workforce"
+    ) == "labor"
+
+
+def test_labor_layoffs():
+    """Layoff / hiring language should trigger labor."""
+    assert _classify_category(
+        "Tech layoffs accelerated while hiring in other jobs recovered"
+    ) == "labor"

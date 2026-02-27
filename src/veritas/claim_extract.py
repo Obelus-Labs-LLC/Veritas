@@ -157,6 +157,46 @@ def _has_date(s: str) -> bool:
     return bool(_DATE_RE.search(s))
 
 
+# Year extraction for temporal awareness
+_YEAR_RE = re.compile(r'\b(1[89]\d{2}|20[0-4]\d)\b')  # 1800-2049
+_MONTH_YEAR_RE = re.compile(
+    r'(?:January|February|March|April|May|June|July|August|'
+    r'September|October|November|December)\s+(?:\d{1,2},?\s+)?'
+    r'(1[89]\d{2}|20[0-4]\d)',
+    re.IGNORECASE,
+)
+
+
+def _extract_claim_date(text: str) -> str:
+    """Extract the most relevant year from claim text.
+
+    Priority:
+      1. Month+Year patterns ("January 2022", "March 15, 2008")
+      2. Standalone 4-digit years in claim range (1800-2049)
+
+    Returns year string (e.g. "2022") or empty string.
+    Prefers the most specific / latest date when multiple found.
+    """
+    # Priority 1: Month + Year (most specific)
+    month_matches = _MONTH_YEAR_RE.findall(text)
+    if month_matches:
+        return month_matches[-1]  # last occurrence (usually the most relevant)
+
+    # Priority 2: Standalone years
+    year_matches = _YEAR_RE.findall(text)
+    if not year_matches:
+        return ""
+
+    # Filter out numbers that are likely not years (quantities, amounts)
+    # e.g., "2000 employees" → 2000 is a year, but "in 2000" is more certain
+    # Heuristic: prefer years in common claim ranges (1900-2030)
+    good_years = [y for y in year_matches if 1900 <= int(y) <= 2030]
+    if good_years:
+        return good_years[-1]
+
+    return year_matches[-1]
+
+
 def _has_named_entity(s: str) -> bool:
     return bool(_NAMED_ENTITY_RE.search(s))
 
@@ -374,6 +414,47 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
         "missile", "nuclear", "nato", "pentagon", "troops", "combat",
         "drone", "drones", "intelligence", "security", "sanctions",
     ]),
+    "education": frozenset([
+        "education", "school", "schools", "college", "university", "universities",
+        "student", "students", "teacher", "teachers", "teaching",
+        "curriculum", "tuition", "enrollment", "graduation", "degree", "degrees",
+        "literacy", "academic", "classroom", "campus",
+        "k-12", "elementary", "high school", "middle school",
+        "charter", "public school", "private school",
+        "scholarship", "scholarships", "student loan", "student loans",
+        "dropout", "dropout rate", "standardized test", "test scores",
+        "stem", "bachelor", "masters", "phd", "doctorate",
+        "educational", "superintendent", "school board",
+    ]),
+    "energy_climate": frozenset([
+        "climate", "climate change", "global warming", "greenhouse",
+        "carbon", "carbon dioxide", "co2", "emissions", "emission",
+        "renewable", "solar", "wind", "wind power", "solar power",
+        "fossil fuel", "fossil fuels", "coal", "natural gas", "oil",
+        "petroleum", "fracking", "pipeline", "pipelines",
+        "electric vehicle", "ev", "battery", "batteries",
+        "temperature", "sea level", "ice cap", "glacier",
+        "paris agreement", "kyoto", "epa", "clean energy",
+        "nuclear energy", "nuclear power", "hydroelectric",
+        "geothermal", "biofuel", "sustainable", "sustainability",
+        "drought", "wildfire", "hurricane", "flooding",
+        "deforestation", "biodiversity", "ecosystem",
+        "methane", "ozone", "pollution", "pollutant", "pollutants",
+    ]),
+    "labor": frozenset([
+        "labor", "labour", "workers", "worker", "workforce",
+        "employment", "unemployment", "jobs", "job",
+        "wages", "wage", "salary", "salaries", "minimum wage",
+        "union", "unions", "strike", "strikes", "collective bargaining",
+        "hiring", "layoff", "layoffs", "fired", "termination",
+        "remote work", "work from home", "gig economy", "freelance",
+        "payroll", "payrolls", "nonfarm", "labor force",
+        "labor market", "participation rate", "job openings",
+        "quit rate", "resignation", "great resignation",
+        "hourly", "overtime", "benefits", "pension", "pensions",
+        "occupational", "workplace", "osha",
+        "automation", "displaced", "retraining", "apprenticeship",
+    ]),
 }
 
 
@@ -476,6 +557,9 @@ def extract_claims_from_segments(segments: List[Segment], source_id: str) -> Lis
             if cat != "general":
                 signals.append(f"category:{cat}")
 
+            # Extract temporal date from claim text
+            claim_date = _extract_claim_date(sent)
+
             raw_claims.append(Claim(
                 id=new_id(),
                 source_id=source_id,
@@ -484,6 +568,7 @@ def extract_claims_from_segments(segments: List[Segment], source_id: str) -> Lis
                 ts_end=ts_end,
                 confidence_language=conf,
                 category=cat,
+                claim_date=claim_date,
                 claim_hash=chash,
                 claim_hash_global=_claim_hash_global(sent),
                 signals="|".join(signals),

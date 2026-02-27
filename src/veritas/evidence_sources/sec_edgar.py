@@ -324,11 +324,36 @@ def extract_relevant_snippet(
 # Main search function
 # ------------------------------------------------------------------
 
+def _compute_date_range(claim_date: str, upload_date: str) -> tuple[str, str]:
+    """Compute EDGAR date range from claim/source temporal context.
+
+    Priority: claim_date (year in claim text) > upload_date (source upload).
+    Falls back to 2018-2026 if no temporal context.
+    Returns (startdt, enddt) as YYYY-MM-DD strings.
+    """
+    anchor_year = None
+    if claim_date and claim_date.isdigit() and len(claim_date) == 4:
+        anchor_year = int(claim_date)
+    elif upload_date:
+        # yt-dlp format: YYYYMMDD or ISO date
+        try:
+            anchor_year = int(upload_date[:4])
+        except (ValueError, IndexError):
+            pass
+
+    if anchor_year and 1990 <= anchor_year <= 2030:
+        return f"{anchor_year - 1}-01-01", f"{anchor_year + 1}-12-31"
+
+    return "2018-01-01", "2026-12-31"
+
+
 def search_sec_edgar(
     claim_text: str,
     max_results: int = 5,
     source_entity: str = "",
     enrich: bool = True,
+    claim_date: str = "",
+    upload_date: str = "",
 ) -> List[Dict[str, Any]]:
     """Search SEC EDGAR for filings matching a claim.
 
@@ -337,6 +362,8 @@ def search_sec_edgar(
         max_results: Max filing hits to return.
         source_entity: Company name from source metadata (injected into query).
         enrich: If True, fetch filing text and extract snippet for scoring.
+        claim_date: Year extracted from claim text (e.g. "2022").
+        upload_date: Source upload date from yt-dlp (e.g. "20250204").
 
     Returns list of dicts with keys: url, title, source_name, evidence_type, snippet.
     """
@@ -348,14 +375,16 @@ def search_sec_edgar(
     if source_entity and source_entity.lower() not in query.lower():
         query = f"{source_entity} {query}"
 
+    startdt, enddt = _compute_date_range(claim_date, upload_date)
+
     resp = rate_limited_get(
         _SEARCH_URL,
         source_name="sec_edgar",
         params={
             "q": query,
             "dateRange": "custom",
-            "startdt": "2020-01-01",
-            "enddt": "2026-12-31",
+            "startdt": startdt,
+            "enddt": enddt,
         },
         headers={
             "User-Agent": _SEC_UA,
@@ -408,6 +437,7 @@ def search_sec_edgar(
                 "source_name": "sec_edgar",
                 "evidence_type": "filing",
                 "snippet": meta_snippet[:200],
+                "evidence_date": file_date[:4] if file_date else "",
             })
 
     # Enrichment: fetch filing text and extract relevant snippet

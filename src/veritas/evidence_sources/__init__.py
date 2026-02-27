@@ -8,6 +8,13 @@ from .yfinance_source import search_yfinance
 from .wikipedia_source import search_wikipedia
 from .fred_source import search_fred
 from .google_factcheck import search_google_factcheck
+from .openfda import search_openfda
+from .bls import search_bls
+from .cbo import search_cbo
+from .usaspending import search_usaspending
+from .census import search_census
+from .worldbank import search_worldbank
+from .patentsview import search_patentsview
 
 ALL_SOURCES = [
     ("crossref", search_crossref),
@@ -18,4 +25,11 @@ ALL_SOURCES = [
     ("wikipedia", search_wikipedia),
     ("fred", search_fred),
     ("google_factcheck", search_google_factcheck),
+    ("openfda", search_openfda),
+    ("bls", search_bls),
+    ("cbo", search_cbo),
+    ("usaspending", search_usaspending),
+    ("census", search_census),
+    ("worldbank", search_worldbank),
+    ("patentsview", search_patentsview),
 ]

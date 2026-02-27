@@ -277,9 +277,9 @@ class TestRegistryAndRouting:
         names = [name for name, _ in ALL_SOURCES]
         assert "google_factcheck" in names
 
-    def test_source_count_is_8(self):
+    def test_source_count_is_15(self):
         from veritas.evidence_sources import ALL_SOURCES
-        assert len(ALL_SOURCES) == 8
+        assert len(ALL_SOURCES) == 15
 
     def test_politics_routing_includes_factcheck(self):
         from veritas.assist import _select_sources_for_category

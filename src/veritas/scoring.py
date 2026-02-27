@@ -67,6 +67,8 @@ def score_evidence(
     evidence_snippet: str,
     evidence_type: str,
     source_name: str,
+    claim_date: str = "",
+    evidence_date: str = "",
 ) -> Tuple[int, str]:
     """Score how well an evidence result matches a claim.
 
@@ -131,6 +133,14 @@ def score_evidence(
         "science": {"research", "study", "climate", "energy", "species", "experiment"},
         "politics": {"vote", "election", "congress", "senate", "legislation", "policy"},
         "military": {"military", "defense", "weapon", "security", "intelligence"},
+        "education": {"education", "school", "student", "teacher", "tuition",
+                       "enrollment", "graduation", "degree", "literacy", "curriculum"},
+        "energy_climate": {"climate", "carbon", "emissions", "renewable", "solar",
+                            "fossil", "temperature", "energy", "ev", "battery",
+                            "greenhouse", "pollution", "sustainable"},
+        "labor": {"labor", "workers", "employment", "unemployment", "wages",
+                   "union", "workforce", "hiring", "layoff", "payroll",
+                   "jobs", "salary", "minimum", "pension"},
     }
     cat_terms = _CAT_TERMS.get(claim_category, set())
     if cat_terms and evidence_tokens:
@@ -163,6 +173,22 @@ def score_evidence(
     if title_lower_words & _GENERIC_TITLES and len(title_lower_words) < 5:
         score = max(0, score - 10)
         signals.append("generic_title_penalty")
+
+    # 8. Temporal alignment bonus/penalty (0 to +10 / -5 points)
+    if claim_date and evidence_date and claim_date.isdigit() and evidence_date.isdigit():
+        year_diff = abs(int(claim_date) - int(evidence_date))
+        if year_diff == 0:
+            score += 10
+            signals.append("temporal_exact_match")
+        elif year_diff <= 1:
+            score += 7
+            signals.append("temporal_near_match")
+        elif year_diff <= 2:
+            score += 3
+            signals.append("temporal_close")
+        elif year_diff >= 5:
+            score = max(0, score - 5)
+            signals.append("temporal_mismatch")
 
     # Clamp
     score = min(100, max(0, score))

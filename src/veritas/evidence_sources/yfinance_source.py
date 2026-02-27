@@ -199,11 +199,42 @@ def _format_market_data_snippet(info: Dict[str, Any], claim_text: str) -> str:
 # Main search function
 # ------------------------------------------------------------------
 
-def search_yfinance(claim_text: str, max_results: int = 5) -> List[Dict[str, Any]]:
+def _format_historical_snippet(
+    hist_data: Any,
+    info: Dict[str, Any],
+    ticker: str,
+    year: int,
+) -> str:
+    """Build a snippet from historical annual financials for a given year."""
+    parts = [f"{info.get('shortName', ticker)} ({ticker}) - Historical Data ({year})"]
+
+    if hist_data is not None and not hist_data.empty:
+        try:
+            # hist_data is a DataFrame of annual financials
+            for col in hist_data.columns:
+                val = hist_data[col].iloc[0] if len(hist_data) > 0 else None
+                if val is not None and val == val:  # not NaN
+                    parts.append(f"{col}: {_format_number(val)}")
+        except Exception:
+            pass
+
+    return " | ".join(parts[:15])
+
+
+def search_yfinance(
+    claim_text: str,
+    max_results: int = 5,
+    claim_date: str = "",
+) -> List[Dict[str, Any]]:
     """Search Yahoo Finance for market data matching a claim.
 
     Standard evidence source signature. Returns list of dicts with keys:
     url, title, source_name, evidence_type, snippet.
+
+    Args:
+        claim_text: The claim to verify.
+        max_results: Max results to return.
+        claim_date: Year from claim text for historical queries (e.g. "2022").
 
     Returns [] if no ticker can be extracted or on any error.
     """
@@ -233,12 +264,51 @@ def search_yfinance(claim_text: str, max_results: int = 5) -> List[Dict[str, Any
             "source_name": "yfinance",
             "evidence_type": "dataset",  # Gets 15-point primary_source boost
             "snippet": snippet[:4000],
+            "evidence_date": "",  # current data
         })
 
-        # Result 2: Recent news (secondary evidence)
+        # Result 2: Historical data if claim references a specific year
+        if claim_date and claim_date.isdigit():
+            year = int(claim_date)
+            if 2000 <= year <= 2026:
+                try:
+                    _rate_limit()
+                    hist = stock.history(start=f"{year}-01-01", end=f"{year}-12-31", interval="3mo")
+                    if hist is not None and not hist.empty:
+                        # Summarize the year's price action
+                        hist_parts = [f"{company_name} ({ticker}) - {year} Price History"]
+                        try:
+                            open_price = hist['Open'].iloc[0]
+                            close_price = hist['Close'].iloc[-1]
+                            high = hist['High'].max()
+                            low = hist['Low'].min()
+                            avg_vol = hist['Volume'].mean()
+                            hist_parts.append(f"Open: ${open_price:.2f}")
+                            hist_parts.append(f"Close: ${close_price:.2f}")
+                            hist_parts.append(f"High: ${high:.2f}")
+                            hist_parts.append(f"Low: ${low:.2f}")
+                            hist_parts.append(f"YTD Return: {((close_price/open_price)-1)*100:.1f}%")
+                            if avg_vol > 0:
+                                hist_parts.append(f"Avg Volume: {_format_number(avg_vol)}")
+                        except Exception:
+                            pass
+
+                        hist_snippet = " | ".join(hist_parts)
+                        results.append({
+                            "url": f"https://finance.yahoo.com/quote/{ticker}/history",
+                            "title": f"{company_name} ({ticker}) - {year} Historical Data",
+                            "source_name": "yfinance",
+                            "evidence_type": "dataset",
+                            "snippet": hist_snippet[:4000],
+                            "evidence_date": str(year),
+                        })
+                except Exception:
+                    pass
+
+        # Result 3: Recent news (secondary evidence)
         try:
             news = stock.news or []
-            for item in news[:min(2, max_results - 1)]:
+            for item in news[:min(2, max_results - len(results))]:
                 news_title = item.get("title", "")
                 publisher = item.get("publisher", "")
                 link = item.get("link", "")
@@ -249,6 +319,7 @@ def search_yfinance(claim_text: str, max_results: int = 5) -> List[Dict[str, Any
                         "source_name": "yfinance",
                         "evidence_type": "secondary",
                         "snippet": news_title[:200],
+                        "evidence_date": "",
                     })
         except Exception:
             pass  # News is optional, don't fail on it

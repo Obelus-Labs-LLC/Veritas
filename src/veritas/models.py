@@ -19,6 +19,7 @@ class Source:
     title: str = ""
     channel: str = ""
     upload_date: str = ""
+    source_type: str = "audio"  # audio|text|pdf|filing|url
     duration_seconds: float = 0.0
     local_audio_path: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -53,7 +54,8 @@ class Claim:
     speaker: Optional[str] = None
     confidence_language: str = "unknown"  # hedged | definitive | unknown
     status: str = "unknown"  # supported | contradicted | partial | unknown
-    category: str = "general"  # finance|tech|politics|health|science|military|general
+    category: str = "general"  # finance|tech|politics|health|science|military|education|energy_climate|labor|general
+    claim_date: str = ""  # extracted year/date from claim text (e.g. "2022", "2008", "1972")
     claim_hash: str = ""  # SHA256(source_id + normalised_text) — same-source dedup
     claim_hash_global: str = ""  # SHA256(normalised_text) — cross-source identity
     signals: str = ""  # pipe-delimited rule signals: "number|named_entity|assertion_verb"

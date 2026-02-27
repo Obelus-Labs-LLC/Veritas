@@ -47,6 +47,70 @@ def ingest(url: str):
 
 
 # ──────────────────────────────────────────────────────────────────
+# ingest-text (text/PDF file ingestion)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command("ingest-text")
+@click.argument("file_path")
+@click.option("--title", default="", help="Source title (defaults to filename).")
+@click.option("--channel", default="", help="Author or channel name.")
+def ingest_text(file_path: str, title: str, channel: str):
+    """Ingest a text or PDF file directly (no audio, no transcription).
+
+    Supports: .txt, .pdf, .md, .csv, .html
+    The text is split into pseudo-segments and fed through the claim
+    extraction pipeline.
+    """
+    from .ingest_text import ingest_text_file, ingest_pdf
+
+    console.print(f"[bold cyan]Ingesting text:[/] {file_path}")
+
+    try:
+        if file_path.lower().endswith(".pdf"):
+            source = ingest_pdf(file_path, title=title, channel=channel)
+        else:
+            source = ingest_text_file(file_path, title=title, channel=channel)
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        sys.exit(1)
+
+    console.print(f"[bold green]Done![/]  source_id = [bold]{source.id}[/]")
+    console.print(f"  Title : {source.title}")
+    console.print(f"  Type  : {source.source_type}")
+    console.print(f"\nNext: run [bold]veritas claims {source.id}[/] to extract claims.")
+
+
+# ──────────────────────────────────────────────────────────────────
+# ingest-url (web article ingestion)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command("ingest-url")
+@click.argument("url")
+@click.option("--title", default="", help="Source title (auto-detected from page).")
+@click.option("--channel", default="", help="Publisher or channel name.")
+def ingest_url_cmd(url: str, title: str, channel: str):
+    """Ingest a web article URL (no audio, extracts article text).
+
+    Fetches the page, extracts article text, and creates pseudo-segments
+    for the claim extraction pipeline.
+    """
+    from .ingest_text import ingest_url
+
+    console.print(f"[bold cyan]Ingesting URL:[/] {url}")
+
+    try:
+        source = ingest_url(url, title=title, channel=channel)
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        sys.exit(1)
+
+    console.print(f"[bold green]Done![/]  source_id = [bold]{source.id}[/]")
+    console.print(f"  Title : {source.title}")
+    console.print(f"  Type  : {source.source_type}")
+    console.print(f"\nNext: run [bold]veritas claims {source.id}[/] to extract claims.")
+
+
+# ──────────────────────────────────────────────────────────────────
 # transcribe
 # ──────────────────────────────────────────────────────────────────
 
@@ -667,6 +731,100 @@ def queue(limit: int):
 
     console.print(table)
     console.print(f"\n  {len(claims)} claim(s) shown  |  Run [bold]veritas review <source_id>[/] to verify interactively")
+
+
+# ──────────────────────────────────────────────────────────────────
+# inspect-verified (inspect auto-verified claims)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command("inspect-verified")
+@click.option("--status", default="", type=click.Choice(["", "supported", "partial"]),
+              help="Filter by auto status (default: both).")
+@click.option("--source", "source_id", default="", help="Filter by source ID.")
+@click.option("--category", default="", help="Filter by category.")
+@click.option("--limit", default=50, show_default=True, help="Max claims to show.")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show full evidence details.")
+def inspect_verified(status: str, source_id: str, category: str, limit: int, verbose: bool):
+    """Inspect auto-verified claims with their evidence and scoring signals.
+
+    Shows all claims that received SUPPORTED or PARTIAL auto-status,
+    along with the evidence that triggered the verification and the
+    scoring signals that contributed to the score.
+    """
+    from . import db as _db
+
+    results = _db.get_verified_claims(
+        status_filter=status,
+        source_id=source_id,
+        category=category,
+        limit=limit,
+    )
+
+    if not results:
+        console.print("[yellow]No auto-verified claims found matching filters.[/]")
+        return
+
+    # Count stats
+    supported = sum(1 for r in results if r["status_auto"] == "supported")
+    partial = sum(1 for r in results if r["status_auto"] == "partial")
+
+    console.print(f"\n[bold cyan]Inspect Auto-Verified Claims[/]")
+    console.print(f"  [green]SUPPORTED: {supported}[/]  |  [yellow]PARTIAL: {partial}[/]  |  Total: {len(results)}\n")
+
+    if verbose:
+        # Detailed view: one block per claim
+        for i, r in enumerate(results, 1):
+            status_styled = "[green]SUPPORTED[/]" if r["status_auto"] == "supported" else "[yellow]PARTIAL[/]"
+            human = f" [bold](human: {r['status_human']})[/]" if r.get("status_human") else ""
+            conf = f"{r['auto_confidence']:.0%}" if r.get("auto_confidence") else "-"
+
+            console.print(f"[bold]#{i}[/]  {status_styled}{human}  score={r.get('best_score', 0)}  confidence={conf}")
+            console.print(f"  [italic]\"{r['claim_text'][:150]}\"[/]")
+            console.print(f"  Source: {r.get('source_title', '')[:60]}  |  Category: {r.get('category', '')}")
+
+            if r.get("claim_date"):
+                console.print(f"  Claim date: {r['claim_date']}")
+
+            # Evidence details
+            if r.get("best_url"):
+                console.print(f"  Evidence: {r.get('best_evidence_title', '')[:80]}")
+                console.print(f"  URL: {r['best_url']}")
+                console.print(f"  Source API: {r.get('best_source', '')}")
+
+            if r.get("best_signals"):
+                console.print(f"  Signals: {r['best_signals']}")
+
+            if r.get("best_snippet"):
+                console.print(f"  Snippet: {r['best_snippet'][:150]}")
+
+            console.print()
+    else:
+        # Table view
+        table = Table(show_lines=True)
+        table.add_column("#", width=4)
+        table.add_column("Status", width=10)
+        table.add_column("Score", width=6, justify="right")
+        table.add_column("Cat.", width=10)
+        table.add_column("Claim Text", ratio=2)
+        table.add_column("Best Source", width=14)
+        table.add_column("Signals", ratio=1)
+
+        for i, r in enumerate(results, 1):
+            status_styled = "[green]SUPPORTED[/]" if r["status_auto"] == "supported" else "[yellow]PARTIAL[/]"
+            table.add_row(
+                str(i),
+                status_styled,
+                str(r.get("best_score", 0)),
+                r.get("category", ""),
+                r.get("claim_text", "")[:100],
+                r.get("best_source", "")[:14],
+                r.get("best_signals", "")[:60],
+            )
+
+        console.print(table)
+
+    console.print(f"\n  {len(results)} claim(s) shown")
+    console.print(f"  Tip: use [bold]--verbose[/] for full evidence details")
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS sources (
     title           TEXT NOT NULL DEFAULT '',
     channel         TEXT NOT NULL DEFAULT '',
     upload_date     TEXT NOT NULL DEFAULT '',
+    source_type     TEXT NOT NULL DEFAULT 'audio',
     duration_seconds REAL NOT NULL DEFAULT 0,
     local_audio_path TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS claims (
     confidence_language TEXT NOT NULL DEFAULT 'unknown',
     status          TEXT NOT NULL DEFAULT 'unknown',
     category        TEXT NOT NULL DEFAULT 'general',
+    claim_date      TEXT NOT NULL DEFAULT '',
     claim_hash      TEXT NOT NULL DEFAULT '',
     claim_hash_global TEXT NOT NULL DEFAULT '',
     signals         TEXT NOT NULL DEFAULT '',
@@ -135,6 +137,18 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE claims ADD COLUMN auto_confidence REAL NOT NULL DEFAULT 0.0")
     if "status_human" not in existing:
         conn.execute("ALTER TABLE claims ADD COLUMN status_human TEXT")
+    if "claim_date" not in existing:
+        conn.execute("ALTER TABLE claims ADD COLUMN claim_date TEXT NOT NULL DEFAULT ''")
+
+    # Sources table migrations
+    src_check = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sources'"
+    ).fetchone()
+    if src_check:
+        src_cursor = conn.execute("PRAGMA table_info(sources)")
+        src_existing = {row[1] for row in src_cursor.fetchall()}
+        if "source_type" not in src_existing:
+            conn.execute("ALTER TABLE sources ADD COLUMN source_type TEXT NOT NULL DEFAULT 'audio'")
 
 
 @contextmanager
@@ -161,9 +175,9 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
 def insert_source(s: Source) -> None:
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO sources (id, url, title, channel, upload_date, duration_seconds, local_audio_path, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (s.id, s.url, s.title, s.channel, s.upload_date, s.duration_seconds, s.local_audio_path, s.created_at),
+            "INSERT INTO sources (id, url, title, channel, upload_date, source_type, duration_seconds, local_audio_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (s.id, s.url, s.title, s.channel, s.upload_date, s.source_type, s.duration_seconds, s.local_audio_path, s.created_at),
         )
 
 
@@ -226,12 +240,12 @@ def insert_claims(claims: List[Claim]) -> int:
     with get_conn() as conn:
         conn.executemany(
             "INSERT OR IGNORE INTO claims (id, source_id, text, ts_start, ts_end, speaker, "
-            "confidence_language, status, category, claim_hash, claim_hash_global, signals, "
+            "confidence_language, status, category, claim_date, claim_hash, claim_hash_global, signals, "
             "status_auto, auto_confidence, status_human, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (c.id, c.source_id, c.text, c.ts_start, c.ts_end, c.speaker,
-                 c.confidence_language, c.status, c.category, c.claim_hash,
+                 c.confidence_language, c.status, c.category, c.claim_date, c.claim_hash,
                  c.claim_hash_global, c.signals, c.status_auto, c.auto_confidence,
                  c.status_human, c.created_at, c.updated_at)
                 for c in claims
@@ -353,6 +367,73 @@ def update_claim_human_status(claim_id: str, status_human: str) -> None:
             "UPDATE claims SET status_human = ?, status = ?, updated_at = ? WHERE id = ?",
             (status_human, status_human, datetime.now(timezone.utc).isoformat(), claim_id),
         )
+
+
+def get_verified_claims(
+    status_filter: str = "",
+    source_id: str = "",
+    category: str = "",
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Get auto-verified claims (supported/partial) with their top evidence.
+
+    Returns list of dicts with claim + top evidence suggestion details.
+    """
+    conditions = []
+    params: list = []
+
+    if status_filter:
+        conditions.append("c.status_auto = ?")
+        params.append(status_filter)
+    else:
+        conditions.append("c.status_auto IN ('supported', 'partial')")
+
+    if source_id:
+        conditions.append("c.source_id = ?")
+        params.append(source_id)
+
+    if category:
+        conditions.append("c.category = ?")
+        params.append(category)
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    params.append(limit)
+
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT
+                c.id AS claim_id,
+                c.source_id,
+                c.text AS claim_text,
+                c.category,
+                c.claim_date,
+                c.confidence_language,
+                c.status_auto,
+                c.auto_confidence,
+                c.status_human,
+                c.signals AS claim_signals,
+                s.title AS source_title,
+                s.channel AS source_channel,
+                (SELECT es.url FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_url,
+                (SELECT es.title FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_evidence_title,
+                (SELECT es.source_name FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_source,
+                (SELECT es.score FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_score,
+                (SELECT es.signals FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_signals,
+                (SELECT es.snippet FROM evidence_suggestions es
+                 WHERE es.claim_id = c.id ORDER BY es.score DESC LIMIT 1) AS best_snippet
+            FROM claims c
+            LEFT JOIN sources s ON c.source_id = s.id
+            WHERE {where}
+            ORDER BY c.auto_confidence DESC, c.status_auto ASC
+            LIMIT ?
+        """, params).fetchall()
+
+    return [dict(r) for r in rows]
 
 
 def get_review_queue(limit: int = 20) -> List[Claim]:

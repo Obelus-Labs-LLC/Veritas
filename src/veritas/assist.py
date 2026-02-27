@@ -2,7 +2,9 @@
 
 Pipeline for each claim:
   1. Generate search queries from claim text
-  2. Hit free structured APIs (Crossref, arXiv, PubMed, SEC EDGAR, yfinance, Wikipedia, FRED, Google Fact Check)
+  2. Hit free structured APIs (15 sources: Crossref, arXiv, PubMed, SEC EDGAR,
+     yfinance, Wikipedia, FRED, Google Fact Check, OpenFDA, BLS, CBO,
+     USASpending, Census, World Bank, PatentsView)
   3. Score each result against the claim
   4. Store top N as evidence_suggestions
   5. Optionally set status_auto if guardrails pass
@@ -89,6 +91,55 @@ _MACRO_TERMS = frozenset({
     "recession", "cpi", "consumer price", "trade deficit",
     "national debt", "federal debt", "money supply",
     "treasury", "mortgage rate", "housing starts",
+})
+
+# Drug / FDA indicators
+_DRUG_TERMS = frozenset({
+    "drug", "fda", "adverse", "recall", "recalled", "approved",
+    "approval", "pharmaceutical", "side effect", "medication",
+    "dosage", "prescription", "label", "warning",
+})
+
+# Labor / employment indicators (for BLS)
+_LABOR_TERMS = frozenset({
+    "jobs", "employment", "unemployment", "labor", "labour",
+    "payroll", "payrolls", "wages", "hourly earnings", "workforce",
+    "hiring", "layoffs", "quit rate", "job openings",
+    "labor force", "participation rate", "nonfarm",
+})
+
+# Government spending / budget indicators
+_SPENDING_TERMS = frozenset({
+    "spending", "budget", "deficit", "surplus", "national debt",
+    "federal debt", "appropriation", "entitlement",
+    "social security", "medicare", "medicaid", "cbo",
+    "congressional budget", "sequestration", "debt ceiling",
+    "stimulus", "bailout", "contract", "grant",
+    "government spending", "federal spending", "pentagon",
+})
+
+# Demographics / census indicators
+_DEMOGRAPHICS_TERMS = frozenset({
+    "population", "census", "demographic", "demographics",
+    "median income", "household income", "poverty", "poverty rate",
+    "homeownership", "rent", "uninsured", "health insurance",
+    "college", "bachelor", "education attainment",
+})
+
+# International / development indicators
+_INTERNATIONAL_TERMS = frozenset({
+    "gdp", "gni", "global", "world", "international",
+    "developing", "developed", "trade", "exports", "imports",
+    "foreign aid", "external debt", "gini", "inequality",
+    "life expectancy", "infant mortality", "literacy",
+    "renewable energy", "co2 emissions", "carbon emissions",
+})
+
+# Patent / innovation indicators
+_PATENT_TERMS = frozenset({
+    "patent", "patents", "patented", "invention", "innovation",
+    "intellectual property", "ip", "patent filing",
+    "utility patent", "design patent", "trademark",
 })
 
 
@@ -182,6 +233,61 @@ def _smart_select_sources(
         if "google_factcheck" in boosts:
             boosts["google_factcheck"] += 5
 
+    # Signal 8: Drug / FDA terms → boost openfda
+    drug_count = sum(1 for t in _DRUG_TERMS if t in text_lower)
+    if drug_count >= 2:
+        if "openfda" in boosts:
+            boosts["openfda"] += 10
+    elif drug_count >= 1:
+        if "openfda" in boosts:
+            boosts["openfda"] += 5
+
+    # Signal 9: Labor / employment terms → boost bls
+    labor_count = sum(1 for t in _LABOR_TERMS if t in text_lower)
+    if labor_count >= 2:
+        if "bls" in boosts:
+            boosts["bls"] += 10
+    elif labor_count >= 1:
+        if "bls" in boosts:
+            boosts["bls"] += 5
+
+    # Signal 10: Budget / spending terms → boost cbo + usaspending
+    spending_count = sum(1 for t in _SPENDING_TERMS if t in text_lower)
+    if spending_count >= 2:
+        if "cbo" in boosts:
+            boosts["cbo"] += 10
+        if "usaspending" in boosts:
+            boosts["usaspending"] += 8
+    elif spending_count >= 1:
+        if "cbo" in boosts:
+            boosts["cbo"] += 5
+        if "usaspending" in boosts:
+            boosts["usaspending"] += 4
+
+    # Signal 11: Demographics / census terms → boost census
+    demo_count = sum(1 for t in _DEMOGRAPHICS_TERMS if t in text_lower)
+    if demo_count >= 2:
+        if "census" in boosts:
+            boosts["census"] += 10
+    elif demo_count >= 1:
+        if "census" in boosts:
+            boosts["census"] += 5
+
+    # Signal 12: International / development terms → boost worldbank
+    intl_count = sum(1 for t in _INTERNATIONAL_TERMS if t in text_lower)
+    if intl_count >= 2:
+        if "worldbank" in boosts:
+            boosts["worldbank"] += 10
+    elif intl_count >= 1:
+        if "worldbank" in boosts:
+            boosts["worldbank"] += 5
+
+    # Signal 13: Patent / innovation terms → boost patentsview
+    patent_count = sum(1 for t in _PATENT_TERMS if t in text_lower)
+    if patent_count >= 1:
+        if "patentsview" in boosts:
+            boosts["patentsview"] += 8
+
     # Re-rank: sort by (boost descending, then preserve original order)
     indexed = [(name, fn, boosts.get(name, 0), i)
                for i, (name, fn) in enumerate(category_sources)]
@@ -201,13 +307,16 @@ def _select_sources_for_category(category: str) -> List[Tuple[str, Any]]:
     """
     # Map categories to preferred sources
     priority = {
-        "finance": ["yfinance", "sec_edgar", "fred", "google_factcheck", "crossref", "wikipedia"],
-        "health": ["pubmed", "google_factcheck", "crossref", "wikipedia"],
-        "science": ["arxiv", "crossref", "pubmed", "wikipedia"],
-        "tech": ["arxiv", "crossref", "google_factcheck", "wikipedia"],
-        "politics": ["google_factcheck", "crossref", "wikipedia"],
-        "military": ["google_factcheck", "crossref", "wikipedia"],
-        "general": ["google_factcheck", "wikipedia", "crossref", "arxiv"],
+        "finance": ["yfinance", "sec_edgar", "fred", "bls", "cbo", "usaspending", "google_factcheck", "crossref", "wikipedia"],
+        "health": ["pubmed", "openfda", "google_factcheck", "crossref", "wikipedia"],
+        "science": ["arxiv", "crossref", "pubmed", "worldbank", "wikipedia"],
+        "tech": ["arxiv", "crossref", "patentsview", "google_factcheck", "wikipedia"],
+        "politics": ["google_factcheck", "cbo", "usaspending", "crossref", "wikipedia"],
+        "military": ["google_factcheck", "usaspending", "crossref", "wikipedia"],
+        "education": ["census", "worldbank", "crossref", "google_factcheck", "wikipedia"],
+        "energy_climate": ["worldbank", "crossref", "arxiv", "google_factcheck", "wikipedia"],
+        "labor": ["bls", "fred", "census", "google_factcheck", "crossref", "wikipedia"],
+        "general": ["google_factcheck", "wikipedia", "crossref", "arxiv", "bls", "census"],
     }
     preferred = priority.get(category, ["crossref"])
 
@@ -230,6 +339,7 @@ def assist_claim(
     max_per_claim: int = 5,
     dry_run: bool = False,
     source_entity: str = "",
+    upload_date: str = "",
 ) -> Dict[str, Any]:
     """Run assisted verification for a single claim.
 
@@ -238,6 +348,7 @@ def assist_claim(
         max_per_claim: Max evidence suggestions to keep.
         dry_run: If True, don't write to DB.
         source_entity: Company/entity name from source metadata (for EDGAR query injection).
+        upload_date: Source upload date for temporal filtering.
 
     Returns a report dict with:
       - suggestions_found: int
@@ -254,19 +365,27 @@ def assist_claim(
     if claim.category == "finance":
         finance_claim_type = classify_finance_claim(claim.text)
 
+    # Temporal context: use claim_date if available, fallback to upload_date
+    claim_date = getattr(claim, "claim_date", "") or ""
+
     # Query each source (smart routing re-ranks based on claim content)
     sources = _select_sources_for_category(claim.category)
     sources = _smart_select_sources(claim.text, claim.category, sources)
     for source_name, search_fn in sources:
         try:
             if source_name == "sec_edgar":
-                # Pass entity injection + enrichment for EDGAR
+                # Pass entity injection + enrichment + temporal context for EDGAR
                 results = search_fn(
                     claim.text,
                     max_results=3,
                     source_entity=source_entity,
                     enrich=True,
+                    claim_date=claim_date,
+                    upload_date=upload_date,
                 )
+            elif source_name == "yfinance":
+                # Pass temporal context for historical data
+                results = search_fn(claim.text, max_results=3, claim_date=claim_date)
             else:
                 results = search_fn(claim.text, max_results=3)
             for r in results:
@@ -285,7 +404,7 @@ def assist_claim(
             "finance_claim_type": finance_claim_type,
         }
 
-    # Score all results
+    # Score all results (with temporal context)
     scored: List[Tuple[int, str, Dict[str, Any]]] = []
     for r in all_results:
         s, sigs = score_evidence(
@@ -295,6 +414,8 @@ def assist_claim(
             evidence_snippet=r.get("snippet", ""),
             evidence_type=r.get("evidence_type", "other"),
             source_name=r.get("source_name", ""),
+            claim_date=claim_date,
+            evidence_date=r.get("evidence_date", ""),
         )
         scored.append((s, sigs, r))
 
@@ -362,11 +483,13 @@ def assist_source(
     if not claims:
         raise ValueError(f"No claims found for source '{source_id}'. Run `veritas claims` first.")
 
-    # Infer entity from source metadata for EDGAR query injection
+    # Infer entity and temporal context from source metadata
     source = db.get_source(source_id)
     source_entity = ""
+    upload_date = ""
     if source:
         source_entity = infer_source_entity(source.title, source.channel)
+        upload_date = source.upload_date or ""
 
     # Clear previous suggestions for this source
     if not dry_run:
@@ -391,6 +514,7 @@ def assist_source(
             max_per_claim=max_per_claim,
             dry_run=dry_run,
             source_entity=source_entity,
+            upload_date=upload_date,
         )
         claim_reports.append({
             "claim_id": claim.id,
