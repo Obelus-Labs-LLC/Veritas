@@ -17,9 +17,9 @@ sys.path.insert(0, "src")
 # ===========================================================================
 
 class TestRegistryExpansion:
-    def test_all_sources_count_is_15(self):
+    def test_all_sources_count_is_17(self):
         from veritas.evidence_sources import ALL_SOURCES
-        assert len(ALL_SOURCES) == 15
+        assert len(ALL_SOURCES) == 17
 
     def test_new_sources_all_registered(self):
         from veritas.evidence_sources import ALL_SOURCES
@@ -71,7 +71,9 @@ class TestRoutingExpansion:
         sources = self.select("labor")
         names = [n for n, _ in sources]
         assert "bls" in names
-        assert names.index("bls") == 0  # BLS should be first for labor
+        # local_dataset is first for all categories, BLS is second for labor
+        assert names[0] == "local_dataset"
+        assert names[1] == "bls"
 
     def test_education_category_routing(self):
         sources = self.select("education")

@@ -17,12 +17,49 @@ from .base import rate_limited_get, build_search_query
 _SEARCH_URL = "https://en.wikipedia.org/w/api.php"
 
 
+def _has_entity_relevance(claim_text: str) -> bool:
+    """Check if a claim mentions named entities that Wikipedia would cover.
+
+    Wikipedia is useful for: company facts, person bios, historical events,
+    geographic data, organizations. It's NOT useful for: generic statistics,
+    personal opinions, abstract concepts without named anchors.
+    """
+    # Multi-word proper nouns (e.g. "Goldman Sachs", "Federal Reserve")
+    entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', claim_text)
+    if entities:
+        return True
+
+    # Single proper nouns (excluding common sentence starters)
+    _SKIP = {"The", "This", "That", "These", "Those", "There", "It", "He",
+             "She", "They", "We", "You", "What", "How", "Why", "When",
+             "Where", "If", "But", "And", "Or", "So", "Not", "No", "Yes"}
+    words = claim_text.split()
+    for i, w in enumerate(words):
+        cleaned = w.strip(".,!?;:\"'()[]")
+        if cleaned and cleaned[0].isupper() and cleaned.isalpha() and len(cleaned) > 2:
+            if cleaned not in _SKIP:
+                return True
+
+    # Acronyms (SEC, FDA, GDP, etc.) — likely refer to named organizations
+    acronyms = re.findall(r'\b[A-Z]{2,5}\b', claim_text)
+    _SKIP_ACRONYMS = {"I", "A", "THE", "AND", "BUT", "FOR", "NOT", "OR", "IF"}
+    if any(a for a in acronyms if a not in _SKIP_ACRONYMS):
+        return True
+
+    return False
+
+
 def search_wikipedia(claim_text: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """Search Wikipedia for articles matching a claim.
 
+    Pre-filters: only queries Wikipedia if claim has named entities.
     Standard evidence source signature. Returns list of dicts with keys:
     url, title, source_name, evidence_type, snippet.
     """
+    # Pre-filter: skip claims without named entities
+    if not _has_entity_relevance(claim_text):
+        return []
+
     query = build_search_query(claim_text)
     if not query:
         return []

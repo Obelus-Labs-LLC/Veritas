@@ -640,8 +640,8 @@ def top_claims(sort_by: str, limit: int):
 @click.argument("source_id")
 @click.option("--max-per-claim", default=5, show_default=True,
               help="Max evidence suggestions per claim.")
-@click.option("--budget-minutes", default=10, show_default=True,
-              help="Time budget in minutes.")
+@click.option("--budget-minutes", default=0, show_default=True,
+              help="Time budget in minutes (0 = no limit, process all claims).")
 @click.option("--dry-run", is_flag=True, default=False,
               help="Search and score but don't store or update status.")
 def assist(source_id: str, max_per_claim: int, budget_minutes: int, dry_run: bool):
@@ -652,7 +652,8 @@ def assist(source_id: str, max_per_claim: int, budget_minutes: int, dry_run: boo
         console.print("[bold yellow]DRY RUN[/] — will search and score but not store anything.\n")
 
     console.print(f"[bold cyan]Assisted verification[/] for source [bold]{source_id}[/]")
-    console.print(f"  Budget: {budget_minutes} min  |  Max per claim: {max_per_claim}\n")
+    budget_label = f"{budget_minutes} min" if budget_minutes > 0 else "unlimited"
+    console.print(f"  Budget: {budget_label}  |  Max per claim: {max_per_claim}\n")
 
     try:
         report = assist_source(
@@ -678,6 +679,9 @@ def assist(source_id: str, max_per_claim: int, budget_minutes: int, dry_run: boo
     table.add_row("Auto -> SUPPORTED", f"[green]{report['auto_supported']}[/]")
     table.add_row("Auto -> PARTIAL", f"[yellow]{report['auto_partial']}[/]")
     table.add_row("Auto -> UNKNOWN", f"[dim]{report['auto_unknown']}[/]")
+    skipped = report.get("claims_skipped_low_verifiability", 0)
+    if skipped > 0:
+        table.add_row("Skipped (low verifiability)", f"[dim]{skipped}[/]")
     console.print(table)
 
     # Top claims needing review

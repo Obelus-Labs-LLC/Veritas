@@ -12,11 +12,55 @@ from .base import rate_limited_get, build_search_query
 _BASE_URL = "https://api.crossref.org/works"
 
 
+_ACADEMIC_INDICATORS = frozenset({
+    "study", "studies", "research", "researchers", "published", "paper",
+    "journal", "peer-reviewed", "findings", "experiment", "experiments",
+    "hypothesis", "methodology", "statistical", "sample size",
+    "correlation", "causation", "meta-analysis", "systematic review",
+    "university", "professor", "phd", "thesis", "citation",
+    "author", "authors", "scholar", "academic", "literature",
+    "doi", "preprint", "manuscript", "proceedings", "conference",
+    "evidence", "observed", "measured", "demonstrated", "analyzed",
+    "theoretical", "empirical", "framework", "paradigm",
+    "clinical", "trial", "trials", "randomized", "placebo",
+    "peer reviewed", "double-blind", "cohort", "longitudinal",
+})
+
+
+def _has_academic_relevance(claim_text: str) -> bool:
+    """Check if a claim is likely to match academic literature.
+
+    Returns True if the claim contains academic language, specific
+    scientific terms, or named entities that suggest an academic source
+    would be relevant. Returns False for generic claims, personal
+    opinions, or topics better served by government/financial sources.
+    """
+    lower = claim_text.lower()
+
+    # Direct academic language
+    for term in _ACADEMIC_INDICATORS:
+        if term in lower:
+            return True
+
+    # Named multi-word entities (researchers, institutions, etc.)
+    import re
+    entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', claim_text)
+    if len(entities) >= 2:
+        return True
+
+    return False
+
+
 def search_crossref(claim_text: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """Search Crossref for academic works matching a claim.
 
+    Pre-filters: only queries Crossref if claim has academic relevance.
     Returns list of dicts with keys: url, title, source_name, evidence_type, snippet.
     """
+    # Pre-filter: skip claims without academic relevance
+    if not _has_academic_relevance(claim_text):
+        return []
+
     query = build_search_query(claim_text)
     if not query:
         return []

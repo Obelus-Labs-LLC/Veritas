@@ -15,12 +15,16 @@ from .usaspending import search_usaspending
 from .census import search_census
 from .worldbank import search_worldbank
 from .patentsview import search_patentsview
+from .local_datasets import search_local_datasets
+from .sec_gov import search_sec_gov
 
 ALL_SOURCES = [
+    ("local_dataset", search_local_datasets),
     ("crossref", search_crossref),
     ("arxiv", search_arxiv),
     ("pubmed", search_pubmed),
     ("sec_edgar", search_sec_edgar),
+    ("sec_gov", search_sec_gov),
     ("yfinance", search_yfinance),
     ("wikipedia", search_wikipedia),
     ("fred", search_fred),

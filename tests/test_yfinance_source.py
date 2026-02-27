@@ -336,17 +336,19 @@ def test_yfinance_in_all_sources():
 
 
 def test_all_sources_count():
-    """Should have 15 evidence sources total."""
+    """Should have 17 evidence sources total."""
     from veritas.evidence_sources import ALL_SOURCES
-    assert len(ALL_SOURCES) == 15
+    assert len(ALL_SOURCES) == 17
 
 
 def test_yfinance_in_finance_category():
-    """Finance category should include yfinance as first source."""
+    """Finance category should include yfinance near the top."""
     sources = _select_sources_for_category("finance")
     names = [name for name, _ in sources]
     assert "yfinance" in names
-    assert names[0] == "yfinance"
+    # local_dataset is first for all categories, yfinance is second for finance
+    assert names[0] == "local_dataset"
+    assert names[1] == "yfinance"
 
 
 # ── Scoring integration ─────────────────────────────────────────

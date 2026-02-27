@@ -150,9 +150,9 @@ def test_fred_in_all_sources():
     assert "fred" in names
 
 
-def test_all_sources_count_fifteen():
-    """Should now have 15 evidence sources total."""
-    assert len(ALL_SOURCES) == 15
+def test_all_sources_count_seventeen():
+    """Should now have 17 evidence sources total."""
+    assert len(ALL_SOURCES) == 17
 
 
 # ── Routing updates ──────────────────────────────────────────────
@@ -170,9 +170,10 @@ def test_general_category_includes_wikipedia():
     sources = _select_sources_for_category("general")
     names = [name for name, _ in sources]
     assert "wikipedia" in names
-    # google_factcheck is first for general, wikipedia is second
-    assert names[0] == "google_factcheck"
-    assert names[1] == "wikipedia"
+    # local_dataset is first for all categories, google_factcheck is second for general
+    assert names[0] == "local_dataset"
+    assert "google_factcheck" in names
+    assert "wikipedia" in names
 
 
 def test_health_category_includes_wikipedia():

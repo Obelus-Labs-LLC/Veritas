@@ -288,6 +288,24 @@ def _smart_select_sources(
         if "patentsview" in boosts:
             boosts["patentsview"] += 8
 
+    # Signal 14: SEC institutional terms → boost sec_gov
+    _SEC_TERMS = frozenset({
+        "sec", "commission", "enforcement", "examination",
+        "registrant", "registration", "registered", "division",
+        "transfer agent", "broker-dealer", "investment adviser",
+        "municipal advisor", "rulemaking", "whistleblower",
+        "filing fee", "investor protection",
+    })
+    sec_count = sum(1 for t in _SEC_TERMS if t in text_lower)
+    if sec_count >= 2:
+        if "sec_gov" in boosts:
+            boosts["sec_gov"] += 10
+        if "sec_edgar" in boosts:
+            boosts["sec_edgar"] += 5
+    elif sec_count >= 1:
+        if "sec_gov" in boosts:
+            boosts["sec_gov"] += 8
+
     # Re-rank: sort by (boost descending, then preserve original order)
     indexed = [(name, fn, boosts.get(name, 0), i)
                for i, (name, fn) in enumerate(category_sources)]
@@ -306,17 +324,18 @@ def _select_sources_for_category(category: str) -> List[Tuple[str, Any]]:
     All sources are tried for 'general'; category-specific sources are prioritised.
     """
     # Map categories to preferred sources
+    # local_dataset is always first — zero latency, highest precision
     priority = {
-        "finance": ["yfinance", "sec_edgar", "fred", "bls", "cbo", "usaspending", "google_factcheck", "crossref", "wikipedia"],
-        "health": ["pubmed", "openfda", "google_factcheck", "crossref", "wikipedia"],
-        "science": ["arxiv", "crossref", "pubmed", "worldbank", "wikipedia"],
-        "tech": ["arxiv", "crossref", "patentsview", "google_factcheck", "wikipedia"],
-        "politics": ["google_factcheck", "cbo", "usaspending", "crossref", "wikipedia"],
-        "military": ["google_factcheck", "usaspending", "crossref", "wikipedia"],
-        "education": ["census", "worldbank", "crossref", "google_factcheck", "wikipedia"],
-        "energy_climate": ["worldbank", "crossref", "arxiv", "google_factcheck", "wikipedia"],
-        "labor": ["bls", "fred", "census", "google_factcheck", "crossref", "wikipedia"],
-        "general": ["google_factcheck", "wikipedia", "crossref", "arxiv", "bls", "census"],
+        "finance": ["local_dataset", "yfinance", "sec_edgar", "sec_gov", "fred", "bls", "cbo", "usaspending", "google_factcheck", "crossref", "wikipedia"],
+        "health": ["local_dataset", "pubmed", "openfda", "google_factcheck", "crossref", "wikipedia"],
+        "science": ["local_dataset", "arxiv", "crossref", "pubmed", "worldbank", "wikipedia"],
+        "tech": ["local_dataset", "arxiv", "crossref", "patentsview", "google_factcheck", "wikipedia"],
+        "politics": ["local_dataset", "google_factcheck", "sec_gov", "cbo", "usaspending", "crossref", "wikipedia"],
+        "military": ["local_dataset", "google_factcheck", "usaspending", "crossref", "wikipedia"],
+        "education": ["local_dataset", "census", "worldbank", "crossref", "google_factcheck", "wikipedia"],
+        "energy_climate": ["local_dataset", "worldbank", "crossref", "arxiv", "google_factcheck", "wikipedia"],
+        "labor": ["local_dataset", "bls", "fred", "census", "google_factcheck", "crossref", "wikipedia"],
+        "general": ["local_dataset", "google_factcheck", "sec_gov", "wikipedia", "crossref", "arxiv", "bls", "census"],
     }
     preferred = priority.get(category, ["crossref"])
 
@@ -468,15 +487,97 @@ def assist_claim(
     }
 
 
+# ------------------------------------------------------------------
+# Claim verifiability scoring — prioritize claims worth checking
+# ------------------------------------------------------------------
+
+def _verifiability_score(claim: "Claim") -> int:
+    """Score how likely a claim is to be verifiable against evidence sources.
+
+    Higher score = more verifiable = should be checked first.
+    Claims with specific numbers + named entities score highest.
+    Personal anecdotes, opinions, and vague narrative score lowest.
+
+    Returns 0-100.
+    """
+    text = claim.text
+    text_lower = text.lower()
+    score = 0
+
+    # Numbers are the strongest verifiability signal
+    numbers = re.findall(r'\d+(?:\.\d+)?', text)
+    significant_numbers = [n for n in numbers if len(n) >= 2 or float(n) >= 10]
+    if significant_numbers:
+        score += min(30, len(significant_numbers) * 10)
+
+    # Named entities (multi-word proper nouns)
+    entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', text)
+    if entities:
+        score += min(20, len(entities) * 10)
+
+    # Single proper nouns (capitalized words not at sentence start)
+    words = text.split()
+    proper_nouns = [w for i, w in enumerate(words)
+                    if i > 0 and w[0].isupper() and w.isalpha() and len(w) > 2]
+    if proper_nouns:
+        score += min(10, len(proper_nouns) * 3)
+
+    # Acronyms (2-5 uppercase letters like SEC, GDP, FDA, CPI, EDGAR)
+    acronyms = re.findall(r'\b[A-Z]{2,5}\b', text)
+    _SKIP_ACRONYMS = {"I", "A", "THE", "AND", "BUT", "FOR", "NOT"}
+    acronyms = [a for a in acronyms if a not in _SKIP_ACRONYMS]
+    if acronyms:
+        score += min(10, len(acronyms) * 5)
+
+    # Financial/scientific/measurable terms
+    _MEASURABLE = frozenset({
+        "percent", "billion", "million", "thousand", "trillion",
+        "revenue", "income", "earnings", "growth", "rate",
+        "population", "gdp", "inflation", "unemployment",
+        "patients", "deaths", "cases", "study", "data",
+    })
+    measurable_count = sum(1 for t in _MEASURABLE if t in text_lower)
+    score += min(15, measurable_count * 5)
+
+    # Date references boost verifiability
+    if re.search(r'\b(19|20)\d{2}\b', text):
+        score += 10
+
+    # Currency symbols
+    if re.search(r'[$€£¥]', text):
+        score += 10
+
+    # Penalty: personal/opinion language
+    _PERSONAL = frozenset({
+        "i think", "i believe", "in my opinion", "i feel",
+        "my experience", "for me", "personally", "i guess",
+        "probably", "maybe", "kind of", "sort of",
+        "seems like", "looks like", "i would say",
+    })
+    for phrase in _PERSONAL:
+        if phrase in text_lower:
+            score -= 15
+            break
+
+    # Penalty: vague/narrative without specifics
+    if not significant_numbers and not entities and not proper_nouns:
+        score -= 20
+
+    return max(0, min(100, score))
+
+
 def assist_source(
     source_id: str,
     max_per_claim: int = 5,
-    budget_minutes: int = 10,
+    budget_minutes: int = 0,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Run assisted verification for all claims in a source.
 
     Fetches source metadata for entity injection (company name for EDGAR queries).
+    Claims are sorted by verifiability score — most verifiable claims processed first.
+    budget_minutes=0 means no budget limit (process all claims).
+
     Returns aggregate report.
     """
     claims = db.get_claims_for_source(source_id)
@@ -495,19 +596,33 @@ def assist_source(
     if not dry_run:
         db.delete_suggestions_for_source(source_id)
 
+    # Sort claims by verifiability score (most verifiable first)
+    scored_claims = [(claim, _verifiability_score(claim)) for claim in claims]
+    scored_claims.sort(key=lambda x: x[1], reverse=True)
+
+    # Count claims below verifiability threshold
+    low_verifiability = sum(1 for _, v in scored_claims if v < 10)
+
     start_time = time.time()
-    deadline = start_time + (budget_minutes * 60)
+    deadline = start_time + (budget_minutes * 60) if budget_minutes > 0 else float("inf")
 
     total_suggestions = 0
     total_stored = 0
     auto_supported = 0
     auto_partial = 0
+    skipped_low_verifiability = 0
     claim_reports: List[Dict[str, Any]] = []
 
-    for claim in claims:
+    for claim, v_score in scored_claims:
         # Check budget
         if time.time() > deadline:
             break
+
+        # Skip very low verifiability claims (score < 5) to save time
+        # These are personal anecdotes, opinions, vague narrative
+        if v_score < 5:
+            skipped_low_verifiability += 1
+            continue
 
         report = assist_claim(
             claim,
@@ -516,6 +631,7 @@ def assist_source(
             source_entity=source_entity,
             upload_date=upload_date,
         )
+        report["verifiability_score"] = v_score
         claim_reports.append({
             "claim_id": claim.id,
             "text_excerpt": claim.text[:80],
@@ -537,12 +653,14 @@ def assist_source(
         "source_entity": source_entity,
         "claims_processed": len(claim_reports),
         "claims_total": len(claims),
+        "claims_skipped_low_verifiability": skipped_low_verifiability,
         "total_suggestions_found": total_suggestions,
         "total_suggestions_stored": total_stored,
         "auto_supported": auto_supported,
         "auto_partial": auto_partial,
         "auto_unknown": len(claim_reports) - auto_supported - auto_partial,
         "elapsed_seconds": round(elapsed, 1),
+        "budget_minutes": budget_minutes,
         "dry_run": dry_run,
         "claim_reports": claim_reports,
     }
