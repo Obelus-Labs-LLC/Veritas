@@ -359,6 +359,6 @@ def _create_text_source(
         segment_count=len(segments),
         transcript_path=str(transcript_path),
     )
-    db.insert_transcript(tmeta)
+    db.upsert_transcript(tmeta)
 
     return source

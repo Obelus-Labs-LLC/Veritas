@@ -153,7 +153,7 @@ class TestIngestTextFile:
         assert source.source_type == "text"
         assert source.title == "Test Article"
         mock_db.insert_source.assert_called_once()
-        mock_db.insert_transcript.assert_called_once()
+        mock_db.upsert_transcript.assert_called_once()
 
     def test_raises_on_missing_file(self):
         with pytest.raises(FileNotFoundError):
@@ -205,7 +205,7 @@ class TestIngestUrl:
         assert source.source_type == "url"
         assert "Test Page" in source.title
         mock_db.insert_source.assert_called_once()
-        mock_db.insert_transcript.assert_called_once()
+        mock_db.upsert_transcript.assert_called_once()
 
     @patch("veritas.ingest_text.db")
     @patch("veritas.ingest_text.requests")

@@ -795,7 +795,8 @@ def inspect_verified(status: str, source_id: str, category: str, limit: int, ver
                 console.print(f"  Signals: {r['best_signals']}")
 
             if r.get("best_snippet"):
-                console.print(f"  Snippet: {r['best_snippet'][:150]}")
+                snippet = r['best_snippet'][:150].encode("ascii", errors="replace").decode("ascii")
+                console.print(f"  Snippet: {snippet}")
 
             console.print()
     else:
