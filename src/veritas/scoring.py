@@ -37,21 +37,69 @@ _NUM_RE = re.compile(r'\d+')
 # Extract financial numbers with decimals (e.g., "113.8", "31.6", "2.82")
 _FINANCIAL_NUM_RE = re.compile(r'\d+(?:\.\d+)?')
 
+# Unit-qualified numbers: "$5.5 billion", "14 trillion", "350 million"
+_UNIT_RE = re.compile(r'(\d+(?:\.\d+)?)\s*(billion|trillion|million)', re.IGNORECASE)
+
 
 def _extract_claim_numbers(text: str) -> set[str]:
-    """Extract significant numbers from claim text.
+    """Extract significant numbers from claim text, with unit conversion.
 
     Returns decimal strings like {"113.8", "403", "17", "31.6", "2.82"}.
+    Also expands unit-qualified numbers:
+      "$5.5 billion" → adds "5500" (millions equivalent)
+      "$14 trillion" → adds "14000000" (millions) and "14000" (billions)
+      "$350 million" → adds "350"
     Filters out trivially common numbers (single digits, years handled separately).
     """
     nums = set(_FINANCIAL_NUM_RE.findall(text))
     # Remove very short/common numbers that match too loosely
-    return {n for n in nums if len(n) >= 2 or float(n) >= 10}
+    nums = {n for n in nums if len(n) >= 2 or float(n) >= 10}
+
+    # Unit-aware expansion: match dataset values denominated in different units
+    for match in _UNIT_RE.finditer(text):
+        val_str = match.group(1)
+        unit = match.group(2).lower()
+        try:
+            val = float(val_str)
+            if unit == "billion":
+                nums.add(str(int(val * 1000)))       # millions equivalent
+            elif unit == "trillion":
+                nums.add(str(int(val * 1_000_000)))  # millions equivalent
+                nums.add(str(int(val * 1000)))        # billions equivalent
+            elif unit == "million":
+                nums.add(str(int(val)))
+        except (ValueError, OverflowError):
+            pass
+
+    return nums
 
 
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
+
+def _is_substantive_snippet(snippet: str) -> bool:
+    """Check if a snippet contains substantive data (not just filing metadata).
+
+    Returns True for:
+      - Long snippets (>200 chars) — original EDGAR enrichment behavior
+      - Snippets with "[Exact number match: ...]" annotations (local_dataset)
+      - Snippets with 3+ pipe-separated fields containing numbers (structured data)
+    Returns False for:
+      - Short metadata-only stubs like "Filed: 2025-02-04 | Period: 2024-12-31"
+    """
+    if len(snippet) > 200:
+        return True
+    if snippet.startswith("[Exact number match:"):
+        return True
+    # Structured data: 3+ pipe-separated fields with numeric content
+    if "|" in snippet:
+        fields = snippet.split("|")
+        numeric_fields = sum(1 for f in fields if _NUM_RE.search(f))
+        if numeric_fields >= 3:
+            return True
+    return False
+
 
 _GENERIC_TITLES = frozenset([
     "introduction", "abstract", "summary", "chapter", "section", "appendix",
@@ -86,7 +134,7 @@ def score_evidence(
     if claim_tokens and evidence_tokens:
         overlap = claim_tokens & evidence_tokens
         overlap_ratio = len(overlap) / max(len(claim_tokens), 1)
-        token_score = min(30, int(overlap_ratio * 60))  # 50% overlap = 30 pts
+        token_score = min(30, int(overlap_ratio * 72))  # 42% overlap = 30 pts
         if token_score > 0:
             score += token_score
             signals.append(f"token_overlap:{len(overlap)}")
@@ -107,12 +155,16 @@ def score_evidence(
     if claim_nums and evidence_nums:
         matched_nums = claim_nums & evidence_nums
         if matched_nums:
-            score += min(10, len(matched_nums) * 5)
+            n = len(matched_nums)
+            # First 2 matches: 5 pts each; additional: 3 pts each (diminishing)
+            num_score = min(2, n) * 5 + max(0, n - 2) * 3
+            score += min(15, num_score)
             signals.append(f"number_match:{','.join(list(matched_nums)[:3])}")
 
-    # 3b. Exact financial number match — big boost for enriched filing snippets
+    # 3b. Exact financial number match — big boost for substantive evidence
     #     Matches decimal numbers like "113.8", "31.6", "2.82"
-    if evidence_snippet and len(evidence_snippet) > 200:
+    #     Gate: snippet must contain real data (not just filing metadata stubs)
+    if evidence_snippet and _is_substantive_snippet(evidence_snippet):
         claim_financial_nums = _extract_claim_numbers(claim_text)
         snippet_financial_nums = set(_FINANCIAL_NUM_RE.findall(evidence_snippet))
         exact_matches = claim_financial_nums & snippet_financial_nums
@@ -189,6 +241,28 @@ def score_evidence(
         elif year_diff >= 5:
             score = max(0, score - 5)
             signals.append("temporal_mismatch")
+
+    # 9. Multi-signal quality bonus (0-15 points)
+    # When multiple independent signals converge, evidence quality is
+    # much higher than the sum of parts. Only fires with 3+ signals.
+    confirming_signals = 0
+    if any(s.startswith("token_overlap") for s in signals):
+        confirming_signals += 1
+    if any(s.startswith("entity_match") for s in signals):
+        confirming_signals += 1
+    if any(s.startswith("number_match") or s.startswith("number_exact_match") for s in signals):
+        confirming_signals += 1
+    if any(s.startswith("keyphrase_hit") for s in signals):
+        confirming_signals += 1
+    if any(s.startswith("category_match") for s in signals):
+        confirming_signals += 1
+
+    if confirming_signals >= 4:
+        score += 15
+        signals.append(f"multi_signal_bonus:{confirming_signals}")
+    elif confirming_signals >= 3:
+        score += 10
+        signals.append(f"multi_signal_bonus:{confirming_signals}")
 
     # Clamp
     score = min(100, max(0, score))
