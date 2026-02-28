@@ -134,10 +134,64 @@ def _load_all_datasets() -> List[Dict[str, Any]]:
 
 
 def _extract_numbers(text: str) -> set:
-    """Extract significant numbers from text."""
-    nums = set(re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', text))
+    """Extract significant numbers from text, including unit-converted variants.
+
+    "$5.5 billion" → {"5.5", "5500"} so we can match million-denominated datasets.
+    "$14 trillion" → {"14", "14000000"} similarly.
+    """
+    raw_nums = set(re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', text))
     # Normalize: remove commas
-    return {n.replace(",", "") for n in nums if len(n.replace(",", "").replace(".", "")) >= 2}
+    nums = {n.replace(",", "") for n in raw_nums if len(n.replace(",", "").replace(".", "")) >= 2}
+
+    # Unit-aware expansion: look for "$X billion" / "$X trillion" patterns
+    text_lower = text.lower()
+    for match in re.finditer(r'(\d+(?:,\d{3})*(?:\.\d+)?)\s*(billion|trillion|million)', text_lower):
+        val_str = match.group(1).replace(",", "")
+        unit = match.group(2)
+        try:
+            val = float(val_str)
+            if unit == "billion":
+                # Add millions equivalent (e.g., 5.5 billion → 5500)
+                millions = int(val * 1000)
+                nums.add(str(millions))
+                # Also add rounded (e.g., 5500 → 5500)
+                if val == int(val):
+                    nums.add(str(int(val * 1000)))
+            elif unit == "trillion":
+                millions = int(val * 1_000_000)
+                nums.add(str(millions))
+                billions = int(val * 1000)
+                nums.add(str(billions))
+            elif unit == "million":
+                nums.add(str(int(val)))
+        except (ValueError, OverflowError):
+            pass
+
+    # Also handle "$X.X billion" without explicit "billion" if preceded by $
+    # and percentage patterns like "14%" → keep "14"
+    return nums
+
+
+def _extract_key_terms(text: str) -> List[str]:
+    """Extract multi-word key terms (company names, product names) from claim text."""
+    terms = []
+    # Match capitalized multi-word sequences (proper nouns / names)
+    for m in re.finditer(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+', text):
+        terms.append(m.group().lower())
+    # Match specific known compound terms
+    _COMPOUND_TERMS = [
+        "google services", "google cloud", "google search", "youtube ads",
+        "google network", "other bets", "google advertising",
+        "net income", "operating income", "total revenue", "operating margin",
+        "share repurchase", "assets under management", "cost of revenue",
+        "diluted eps", "earnings per share", "dividend payment",
+        "blackrock", "alphabet", "waymo",
+    ]
+    text_lower = text.lower()
+    for term in _COMPOUND_TERMS:
+        if term in text_lower:
+            terms.append(term)
+    return terms
 
 
 def _find_matching_rows(
@@ -167,22 +221,48 @@ def _find_matching_rows(
         if w_clean and w_clean not in _STOP and len(w_clean) > 2:
             claim_words.add(w_clean)
 
+    # Multi-word key terms get higher weight
+    key_terms = _extract_key_terms(claim_text)
+
+    # Filename relevance bonus: does dataset filename relate to claim?
+    filename_lower = dataset.get("filename", "").lower()
+    filename_bonus = 0
+    for term in key_terms:
+        if term.replace(" ", "-") in filename_lower or term.replace(" ", "") in filename_lower:
+            filename_bonus = 10
+            break
+    # Also check single words: "alphabet" in "alphabet-key-metrics-2025.csv"
+    for w in claim_words:
+        if len(w) > 4 and w in filename_lower:
+            filename_bonus = max(filename_bonus, 5)
+
     for row_idx, row in enumerate(rows):
         row_text = " ".join(str(c) for c in row).lower()
         row_numbers = _extract_numbers(" ".join(str(c) for c in row))
 
         # Score this row
-        score = 0
+        score = filename_bonus  # start with filename relevance
 
         # Exact number matches (strongest signal)
         num_matches = claim_numbers & row_numbers
         if num_matches:
             score += len(num_matches) * 20
 
-        # Term overlap
+        # Multi-word term matches (strong signal)
+        for term in key_terms:
+            if term in row_text:
+                score += 15
+
+        # Single word overlap
         for word in claim_words:
             if word in row_text:
                 score += 3
+
+        # Header match bonus: claim terms in column headers
+        header_text = " ".join(h.lower() for h in headers)
+        for term in key_terms:
+            if term in header_text:
+                score += 5
 
         if score >= 10:  # minimum threshold
             # Build a snippet from this row
@@ -259,6 +339,21 @@ def search_local_datasets(claim_text: str, max_results: int = 5) -> List[Dict[st
                 "snippet": snippet[:4000],
             })
 
-    # Sort by snippet length as proxy for match quality (more data = better)
-    results.sort(key=lambda r: len(r.get("snippet", "")), reverse=True)
+    # Sort by match quality: prefer results with unit-converted number matches
+    # and dataset filename relevance over simple small-number coincidences
+    def _result_sort_key(r):
+        snippet = r.get("snippet", "")
+        # Prefer matches with bigger numbers (less likely coincidental)
+        num_match = re.search(r'Exact number match: ([\d,]+)', snippet)
+        biggest_num = 0
+        if num_match:
+            nums_part = num_match.group(1)
+            for n in nums_part.split(", "):
+                try:
+                    biggest_num = max(biggest_num, float(n.replace(",", "")))
+                except ValueError:
+                    pass
+        return (biggest_num, len(snippet))
+
+    results.sort(key=_result_sort_key, reverse=True)
     return results[:max_results]
