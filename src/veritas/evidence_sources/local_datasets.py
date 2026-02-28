@@ -303,6 +303,7 @@ def search_local_datasets(claim_text: str, max_results: int = 5) -> List[Dict[st
     for ds in datasets:
         # Quick pre-filter: does this dataset's text index contain ANY claim numbers?
         text_idx = ds.get("text_index", "")
+        row_count = ds.get("row_count", 0)
         has_number_hit = False
         for num in claim_numbers:
             if num in text_idx:
@@ -316,6 +317,17 @@ def search_local_datasets(claim_text: str, max_results: int = 5) -> List[Dict[st
 
         if not has_number_hit and term_hits < 2:
             continue  # skip datasets with no relevance
+
+        # Large time-series datasets (FRED, etc.) produce too many false positives
+        # on small numbers. Require big number matches (>=100) or keyword relevance.
+        if row_count > 500:
+            big_number_hit = any(
+                num in text_idx
+                for num in claim_numbers
+                if len(num.replace(".", "")) >= 3  # at least a 3-digit number
+            )
+            if not big_number_hit and term_hits < 3:
+                continue
 
         # Deep search: find matching rows
         row_matches = _find_matching_rows(ds, claim_text, claim_numbers)
