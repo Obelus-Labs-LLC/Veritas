@@ -107,6 +107,28 @@ _GENERIC_TITLES = frozenset([
     "podcast", "episode", "transcript", "interview",
 ])
 
+# Category-relevant terms — used by both score_evidence() and knowledge_graph.py
+_CAT_TERMS = {
+    "finance": {"rate", "inflation", "gdp", "economy", "market", "fiscal",
+                 "monetary", "bank", "revenue", "revenues", "income",
+                 "earnings", "margin", "operating", "cash", "flow",
+                 "cap", "price", "eps", "dividend", "ratio", "stock",
+                 "shares", "valuation", "profit", "quarterly"},
+    "tech": {"ai", "model", "gpu", "software", "algorithm", "computing", "neural"},
+    "health": {"health", "drug", "vaccine", "clinical", "patient", "disease", "treatment"},
+    "science": {"research", "study", "climate", "energy", "species", "experiment"},
+    "politics": {"vote", "election", "congress", "senate", "legislation", "policy"},
+    "military": {"military", "defense", "weapon", "security", "intelligence"},
+    "education": {"education", "school", "student", "teacher", "tuition",
+                   "enrollment", "graduation", "degree", "literacy", "curriculum"},
+    "energy_climate": {"climate", "carbon", "emissions", "renewable", "solar",
+                        "fossil", "temperature", "energy", "ev", "battery",
+                        "greenhouse", "pollution", "sustainable"},
+    "labor": {"labor", "workers", "employment", "unemployment", "wages",
+               "union", "workforce", "hiring", "layoff", "payroll",
+               "jobs", "salary", "minimum", "pension"},
+}
+
 
 def score_evidence(
     claim_text: str,
@@ -174,26 +196,6 @@ def score_evidence(
             signals.append(f"number_exact_match:{','.join(sorted(exact_matches)[:4])}")
 
     # 4. Category relevance boost (0-10 points)
-    _CAT_TERMS = {
-        "finance": {"rate", "inflation", "gdp", "economy", "market", "fiscal",
-                     "monetary", "bank", "revenue", "revenues", "income",
-                     "earnings", "margin", "operating", "cash", "flow",
-                     "cap", "price", "eps", "dividend", "ratio", "stock",
-                     "shares", "valuation", "profit", "quarterly"},
-        "tech": {"ai", "model", "gpu", "software", "algorithm", "computing", "neural"},
-        "health": {"health", "drug", "vaccine", "clinical", "patient", "disease", "treatment"},
-        "science": {"research", "study", "climate", "energy", "species", "experiment"},
-        "politics": {"vote", "election", "congress", "senate", "legislation", "policy"},
-        "military": {"military", "defense", "weapon", "security", "intelligence"},
-        "education": {"education", "school", "student", "teacher", "tuition",
-                       "enrollment", "graduation", "degree", "literacy", "curriculum"},
-        "energy_climate": {"climate", "carbon", "emissions", "renewable", "solar",
-                            "fossil", "temperature", "energy", "ev", "battery",
-                            "greenhouse", "pollution", "sustainable"},
-        "labor": {"labor", "workers", "employment", "unemployment", "wages",
-                   "union", "workforce", "hiring", "layoff", "payroll",
-                   "jobs", "salary", "minimum", "pension"},
-    }
     cat_terms = _CAT_TERMS.get(claim_category, set())
     if cat_terms and evidence_tokens:
         cat_overlap = cat_terms & evidence_tokens

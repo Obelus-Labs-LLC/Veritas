@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Generator, Optional, List, Dict, Any
 
 from . import config
-from .models import Source, TranscriptMeta, Claim, Evidence, EvidenceSuggestion
+from .models import Source, TranscriptMeta, Claim, Evidence, EvidenceSuggestion, ClaimCluster
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -89,6 +89,30 @@ CREATE TABLE IF NOT EXISTS evidence_suggestions (
 
 CREATE INDEX IF NOT EXISTS idx_evsug_claim ON evidence_suggestions(claim_id);
 CREATE INDEX IF NOT EXISTS idx_evsug_score ON evidence_suggestions(score DESC);
+
+CREATE TABLE IF NOT EXISTS claim_clusters (
+    id                TEXT PRIMARY KEY,
+    representative_text TEXT NOT NULL DEFAULT '',
+    category          TEXT NOT NULL DEFAULT 'general',
+    claim_count       INTEGER NOT NULL DEFAULT 0,
+    source_count      INTEGER NOT NULL DEFAULT 0,
+    best_status       TEXT NOT NULL DEFAULT 'unknown',
+    best_confidence   REAL NOT NULL DEFAULT 0.0,
+    consensus_score   REAL NOT NULL DEFAULT 0.0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cluster_members (
+    cluster_id        TEXT NOT NULL REFERENCES claim_clusters(id),
+    claim_id          TEXT NOT NULL REFERENCES claims(id),
+    fingerprint       TEXT NOT NULL DEFAULT '',
+    similarity_to_rep REAL NOT NULL DEFAULT 0.0,
+    PRIMARY KEY (cluster_id, claim_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_members_claim ON cluster_members(claim_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_members_cluster ON cluster_members(cluster_id);
 """
 
 # ---------------------------------------------------------------------------
@@ -359,6 +383,16 @@ def update_claim_auto_status(claim_id: str, status_auto: str, auto_confidence: f
         )
 
 
+def update_claim_category(claim_id: str, category: str) -> None:
+    """Update the category of a claim (for re-categorisation with source context)."""
+    from datetime import datetime, timezone
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE claims SET category = ?, updated_at = ? WHERE id = ?",
+            (category, datetime.now(timezone.utc).isoformat(), claim_id),
+        )
+
+
 def update_claim_human_status(claim_id: str, status_human: str) -> None:
     """Set human override status."""
     from datetime import datetime, timezone
@@ -526,6 +560,117 @@ def get_top_claims(limit: int = 20) -> List[Dict[str, Any]]:
         result.append(d)
     return result
 
+
+# ---------------------------------------------------------------------------
+# Cluster CRUD (knowledge graph)
+# ---------------------------------------------------------------------------
+
+def clear_clusters() -> None:
+    """Delete all clusters and members (for full rebuild)."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM cluster_members")
+        conn.execute("DELETE FROM claim_clusters")
+
+
+def upsert_clusters(clusters: List[ClaimCluster]) -> int:
+    """Insert or replace cluster rows. Returns count."""
+    if not clusters:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO claim_clusters "
+            "(id, representative_text, category, claim_count, source_count, "
+            "best_status, best_confidence, consensus_score, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (c.id, c.representative_text, c.category, c.claim_count,
+                 c.source_count, c.best_status, c.best_confidence,
+                 c.consensus_score, c.created_at, c.updated_at)
+                for c in clusters
+            ],
+        )
+    return len(clusters)
+
+
+def insert_cluster_members(members: List[Dict[str, Any]]) -> int:
+    """Insert cluster member rows. Returns count."""
+    if not members:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO cluster_members "
+            "(cluster_id, claim_id, fingerprint, similarity_to_rep) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (m["cluster_id"], m["claim_id"], m["fingerprint"],
+                 m["similarity_to_rep"])
+                for m in members
+            ],
+        )
+    return len(members)
+
+
+def get_cluster(cluster_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single cluster by ID."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM claim_clusters WHERE id = ?", (cluster_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def get_cluster_members(cluster_id: str) -> List[Dict[str, Any]]:
+    """Get all claims in a cluster with their source details."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT cm.cluster_id, cm.claim_id, cm.fingerprint, cm.similarity_to_rep, "
+            "c.text, c.source_id, c.category, c.status_auto, c.auto_confidence, "
+            "s.title AS source_title "
+            "FROM cluster_members cm "
+            "JOIN claims c ON cm.claim_id = c.id "
+            "LEFT JOIN sources s ON c.source_id = s.id "
+            "WHERE cm.cluster_id = ? "
+            "ORDER BY cm.similarity_to_rep DESC",
+            (cluster_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_top_clusters(limit: int = 20, sort_by: str = "consensus") -> List[Dict[str, Any]]:
+    """Get top clusters sorted by consensus, sources, or claim count."""
+    order = {
+        "consensus": "consensus_score DESC, source_count DESC",
+        "sources": "source_count DESC, consensus_score DESC",
+        "claims": "claim_count DESC, consensus_score DESC",
+    }.get(sort_by, "consensus_score DESC, source_count DESC")
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM claim_clusters ORDER BY {order} LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_cluster_for_claim(claim_id: str) -> Optional[Dict[str, Any]]:
+    """Get the cluster that a claim belongs to (if any)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT cc.* FROM claim_clusters cc "
+            "JOIN cluster_members cm ON cc.id = cm.cluster_id "
+            "WHERE cm.claim_id = ?",
+            (claim_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Source verification stats
+# ---------------------------------------------------------------------------
 
 def get_source_verification_stats() -> List[Dict[str, Any]]:
     """Per-source verification metrics for the enhanced sources command.

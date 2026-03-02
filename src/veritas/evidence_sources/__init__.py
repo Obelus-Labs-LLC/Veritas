@@ -17,6 +17,9 @@ from .worldbank import search_worldbank
 from .patentsview import search_patentsview
 from .local_datasets import search_local_datasets
 from .sec_gov import search_sec_gov
+from .duckduckgo import search_duckduckgo
+from .wikidata import search_wikidata
+from .semantic_scholar import search_semantic_scholar
 
 ALL_SOURCES = [
     ("local_dataset", search_local_datasets),
@@ -36,4 +39,7 @@ ALL_SOURCES = [
     ("census", search_census),
     ("worldbank", search_worldbank),
     ("patentsview", search_patentsview),
+    ("wikidata", search_wikidata),
+    ("duckduckgo", search_duckduckgo),
+    ("semantic_scholar", search_semantic_scholar),
 ]

@@ -352,6 +352,12 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
         "ceo", "cfo", "quarterly earnings", "annual report",
         "balance sheet", "income statement", "cash position",
         "growth", "percent", "percentage",
+        # Source-title patterns (help context scoring for earnings calls)
+        "earnings call", "q1", "q2", "q3", "q4",
+        "fy25", "fy26", "fy24", "fy23", "fy2025", "fy2026",
+        "fiscal year", "fiscal quarter",
+        "watch live", "amzn", "aapl", "msft", "nvda", "goog",
+        "googl", "tsla", "meta", "avgo", "amd", "pltr", "dell",
     ]),
     "tech": frozenset([
         "ai", "artificial intelligence", "machine learning", "gpu", "chip", "chips",
@@ -404,10 +410,21 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
         "hypothesis", "theory", "evidence", "data",
         "university", "professor", "laboratory", "lab",
         "evolution", "ecosystem", "biodiversity", "extinction",
-        "astronomy", "telescope", "planet", "galaxy",
+        "astronomy", "telescope", "planet", "planets", "galaxy", "galaxies",
         "chemistry", "molecule", "atom", "element",
         "mathematics", "mathematical", "equation", "theorem",
         "correlation", "causation", "statistical", "statistically",
+        # Astronomy / cosmology / physics
+        "universe", "cosmic", "cosmology", "astrophysics",
+        "star", "stars", "supernova", "black hole", "dark matter",
+        "dark energy", "gravity", "gravitational", "relativity",
+        "light year", "light years", "orbit", "orbital",
+        "electron", "photon", "neutron", "proton", "particle",
+        "wavelength", "frequency", "radiation", "electromagnetic",
+        "entropy", "thermodynamics", "velocity", "acceleration",
+        "mass", "force", "momentum", "quantum",
+        "neuron", "neurons", "synapse", "brain", "cognitive",
+        "gene", "genetic", "mutation", "chromosome", "crispr",
     ]),
     "military": frozenset([
         "military", "defense", "army", "navy", "war", "weapon", "weapons",
@@ -458,30 +475,56 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
 }
 
 
-def _classify_category(text: str) -> str:
-    """Classify a claim into a topic category by keyword scoring."""
+def _score_all_categories(text: str) -> dict[str, int]:
+    """Score text against all category keyword sets. Returns {category: score}."""
     lower = text.lower()
-    # Strip punctuation so "revenues," matches "revenues" and "quarter." matches "quarter"
     clean = lower.translate(str.maketrans("", "", string.punctuation))
     words = set(clean.split())
-    best_cat = "general"
-    best_score = 0
-
+    scores: dict[str, int] = {}
     for cat, terms in _CATEGORY_TERMS.items():
         score = 0
         for term in terms:
-            # Single-word terms: check word set; multi-word: check substring
             if " " in term:
                 if term in clean:
-                    score += 2  # phrase match is stronger
+                    score += 2
             elif term in words:
                 score += 1
-        if score > best_score:
-            best_score = score
-            best_cat = cat
+        if score > 0:
+            scores[cat] = score
+    return scores
 
-    # Require at least 2 points to assign a non-general category
-    return best_cat if best_score >= 2 else "general"
+
+def _classify_category(text: str, source_title: str = "", source_channel: str = "") -> str:
+    """Classify a claim into a topic category by keyword scoring.
+
+    Uses both claim text AND source context (title/channel) for better accuracy.
+    Source context (e.g. "Apple Q1 FY26 Earnings Call") provides a strong prior
+    that lowers the claim-text threshold from 2 to 1 keyword match.
+    """
+    # Score the claim text itself
+    claim_scores = _score_all_categories(text)
+
+    # Score source context (title + channel) if available
+    context_text = f"{source_title} {source_channel}".strip()
+    context_scores: dict[str, int] = {}
+    if context_text:
+        context_scores = _score_all_categories(context_text)
+        # Merge: context counts at full weight
+        for cat, cscore in context_scores.items():
+            claim_scores[cat] = claim_scores.get(cat, 0) + cscore
+
+    if not claim_scores:
+        return "general"
+
+    best_cat = max(claim_scores, key=claim_scores.get)
+    best_score = claim_scores[best_cat]
+
+    # If source context strongly indicates a category (>= 3 points from title/channel),
+    # lower the threshold: even 1 keyword match in the claim text is enough.
+    context_best = context_scores.get(best_cat, 0)
+    threshold = 1 if context_best >= 3 else 2
+
+    return best_cat if best_score >= threshold else "general"
 
 
 # ------------------------------------------------------------------
@@ -507,11 +550,18 @@ def _is_boilerplate(text: str) -> bool:
 # Public API
 # ------------------------------------------------------------------
 
-def extract_claims_from_segments(segments: List[Segment], source_id: str) -> List[Claim]:
+def extract_claims_from_segments(
+    segments: List[Segment],
+    source_id: str,
+    source_title: str = "",
+    source_channel: str = "",
+) -> List[Claim]:
     """Extract candidate claims from a list of transcript segments.
 
     Uses segment stitching to build complete sentences, then filters for
-    self-contained, checkable claims.
+    self-contained, checkable claims.  Source title/channel are passed to
+    the categoriser so e.g. claims from "Apple Q1 Earnings Call" default
+    to finance even when the claim text alone has only 1 keyword match.
     """
     raw_claims: List[Claim] = []
     seen_texts: set = set()  # quick exact-dedup before expensive SequenceMatcher
@@ -553,7 +603,7 @@ def extract_claims_from_segments(segments: List[Segment], source_id: str) -> Lis
             conf = _classify_confidence(sent)
             if conf != "unknown":
                 signals.append(f"confidence:{conf}")
-            cat = _classify_category(sent)
+            cat = _classify_category(sent, source_title, source_channel)
             if cat != "general":
                 signals.append(f"category:{cat}")
 
@@ -591,7 +641,17 @@ def extract_claims(source_id: str) -> List[Claim]:
         data = json.load(fh)
 
     segments = [Segment(**s) for s in data.get("segments", [])]
-    claims = extract_claims_from_segments(segments, source_id)
+
+    # Load source metadata for context-aware categorisation
+    source = db.get_source(source_id)
+    source_title = source.title if source else ""
+    source_channel = source.channel if source else ""
+
+    claims = extract_claims_from_segments(
+        segments, source_id,
+        source_title=source_title,
+        source_channel=source_channel,
+    )
 
     # Clear previous claims for this source (allows re-running with tuned rules)
     db.delete_claims_for_source(source_id)

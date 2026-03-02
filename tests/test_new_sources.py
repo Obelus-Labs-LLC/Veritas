@@ -17,14 +17,15 @@ sys.path.insert(0, "src")
 # ===========================================================================
 
 class TestRegistryExpansion:
-    def test_all_sources_count_is_17(self):
+    def test_all_sources_count_is_20(self):
         from veritas.evidence_sources import ALL_SOURCES
-        assert len(ALL_SOURCES) == 17
+        assert len(ALL_SOURCES) == 20
 
     def test_new_sources_all_registered(self):
         from veritas.evidence_sources import ALL_SOURCES
         names = [name for name, _ in ALL_SOURCES]
-        for expected in ("openfda", "bls", "cbo", "usaspending", "census", "worldbank", "patentsview"):
+        for expected in ("openfda", "bls", "cbo", "usaspending", "census", "worldbank",
+                         "patentsview", "wikidata", "duckduckgo", "semantic_scholar"):
             assert expected in names, f"{expected} not found in ALL_SOURCES"
 
     def test_original_sources_still_present(self):
@@ -596,3 +597,322 @@ class TestNewSourceScoring:
         )
         assert "primary_source:dataset" in signals
         assert score >= 30
+
+
+# ===========================================================================
+# DuckDuckGo Instant Answers tests
+# ===========================================================================
+
+class TestDuckDuckGo:
+    def setup_method(self):
+        from veritas.evidence_sources.duckduckgo import (
+            search_duckduckgo, _extract_ddg_queries, _parse_ddg_response
+        )
+        self.search = search_duckduckgo
+        self.extract_queries = _extract_ddg_queries
+        self.parse_response = _parse_ddg_response
+
+    def test_extract_multi_word_entity(self):
+        queries = self.extract_queries("Steve Jobs co-founded Apple")
+        assert "Steve Jobs" in queries
+
+    def test_extract_acronym(self):
+        queries = self.extract_queries("NVIDIA designs graphics cards")
+        assert "NVIDIA" in queries
+
+    def test_extract_sentence_start_entity(self):
+        queries = self.extract_queries("Apple was founded in 1976")
+        assert "Apple" in queries
+
+    def test_extract_fallback_keywords(self):
+        queries = self.extract_queries("the speed of light in a vacuum")
+        assert len(queries) >= 1
+        assert "speed" in queries[0]
+
+    def test_extract_empty_returns_empty(self):
+        queries = self.extract_queries("")
+        assert queries == []
+
+    def test_parse_abstract_response(self):
+        data = {
+            "Abstract": "Apple Inc. is an American multinational technology company.",
+            "AbstractURL": "https://en.wikipedia.org/wiki/Apple_Inc.",
+            "AbstractSource": "Wikipedia",
+            "Heading": "Apple Inc.",
+        }
+        results = self.parse_response(data, 5)
+        assert len(results) == 1
+        assert results[0]["source_name"] == "duckduckgo"
+        assert results[0]["evidence_type"] == "secondary"
+        assert "Apple" in results[0]["snippet"]
+
+    def test_parse_answer_response(self):
+        data = {
+            "Abstract": "",
+            "Answer": "299,792,458 m/s",
+            "AbstractURL": "https://duckduckgo.com",
+            "Heading": "Speed of Light",
+        }
+        results = self.parse_response(data, 5)
+        assert len(results) == 1
+        assert "299,792,458" in results[0]["snippet"]
+
+    def test_parse_related_topics(self):
+        data = {
+            "Abstract": "",
+            "RelatedTopics": [
+                {"Text": "Topic about something", "FirstURL": "https://example.com"},
+                {"Topics": [{"Text": "Sub-group"}]},  # should be skipped
+            ],
+        }
+        results = self.parse_response(data, 5)
+        assert len(results) == 1
+        assert results[0]["url"] == "https://example.com"
+
+    def test_parse_empty_response(self):
+        results = self.parse_response({}, 5)
+        assert results == []
+
+    @patch("veritas.evidence_sources.duckduckgo.rate_limited_get")
+    def test_search_returns_results(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "Abstract": "Tesla, Inc. is an American automotive company.",
+            "AbstractURL": "https://en.wikipedia.org/wiki/Tesla,_Inc.",
+            "AbstractSource": "Wikipedia",
+            "Heading": "Tesla, Inc.",
+            "RelatedTopics": [],
+        }
+        mock_get.return_value = mock_resp
+
+        results = self.search("Tesla reported record revenue in Q4")
+        assert len(results) >= 1
+        assert results[0]["source_name"] == "duckduckgo"
+        assert "Tesla" in results[0]["snippet"]
+
+    @patch("veritas.evidence_sources.duckduckgo.rate_limited_get")
+    def test_search_returns_empty_on_api_failure(self, mock_get):
+        mock_get.return_value = None
+        results = self.search("Tesla revenue Q4")
+        assert results == []
+
+
+# ===========================================================================
+# Wikidata tests
+# ===========================================================================
+
+class TestWikidata:
+    def setup_method(self):
+        from veritas.evidence_sources.wikidata import (
+            search_wikidata, _has_entity_relevance, _extract_entity_query, _format_value
+        )
+        self.search = search_wikidata
+        self.has_relevance = _has_entity_relevance
+        self.extract_entity = _extract_entity_query
+        self.format_value = _format_value
+
+    def test_has_relevance_multi_word_proper_noun(self):
+        assert self.has_relevance("Goldman Sachs is a bank")
+
+    def test_has_relevance_acronym(self):
+        assert self.has_relevance("NVIDIA makes GPUs")
+
+    def test_has_relevance_mid_sentence_name(self):
+        assert self.has_relevance("the company Apple was founded")
+
+    def test_no_relevance_for_generic(self):
+        assert not self.has_relevance("the economy is doing well")
+
+    def test_extract_multi_word_entity(self):
+        assert self.extract_entity("Steve Jobs founded Apple") == "Steve Jobs"
+
+    def test_extract_acronym(self):
+        assert self.extract_entity("NVIDIA makes chips") == "NVIDIA"
+
+    def test_extract_mid_sentence(self):
+        assert self.extract_entity("the company Apple was big") == "Apple"
+
+    def test_extract_empty_for_generic(self):
+        assert self.extract_entity("things are going well") == ""
+
+    def test_format_string_value(self):
+        snak = {"datavalue": {"type": "string", "value": "hello"}}
+        assert self.format_value(snak) == "hello"
+
+    def test_format_time_value(self):
+        snak = {"datavalue": {"type": "time", "value": {"time": "+1976-04-01T00:00:00Z"}}}
+        assert self.format_value(snak) == "1976-04-01"
+
+    def test_format_quantity_value(self):
+        snak = {"datavalue": {"type": "quantity", "value": {"amount": "+5000000", "unit": "1"}}}
+        assert self.format_value(snak) == "+5000000"
+
+    @patch("veritas.evidence_sources.wikidata.rate_limited_get")
+    def test_search_returns_results(self, mock_get):
+        # First call: wbsearchentities
+        search_resp = MagicMock()
+        search_resp.json.return_value = {
+            "search": [{
+                "id": "Q312",
+                "label": "Apple Inc.",
+                "description": "American multinational technology company",
+            }]
+        }
+        # Second call: wbgetentities
+        entity_resp = MagicMock()
+        entity_resp.json.return_value = {
+            "entities": {
+                "Q312": {
+                    "claims": {
+                        "P571": [{
+                            "mainsnak": {"datavalue": {"type": "time", "value": {"time": "+1976-04-01T00:00:00Z"}}}
+                        }]
+                    }
+                }
+            }
+        }
+        mock_get.side_effect = [search_resp, entity_resp]
+
+        results = self.search("Apple Inc was founded in 1976")
+        assert len(results) >= 1
+        assert results[0]["source_name"] == "wikidata"
+        assert results[0]["evidence_type"] == "dataset"
+        assert "1976-04-01" in results[0]["snippet"]
+
+    @patch("veritas.evidence_sources.wikidata.rate_limited_get")
+    def test_search_returns_empty_on_no_entity(self, mock_get):
+        mock_get.return_value = None
+        results = self.search("things are going well today")
+        assert results == []
+
+
+# ===========================================================================
+# Semantic Scholar tests
+# ===========================================================================
+
+class TestSemanticScholar:
+    def setup_method(self):
+        from veritas.evidence_sources.semantic_scholar import (
+            search_semantic_scholar, _has_academic_relevance
+        )
+        self.search = search_semantic_scholar
+        self.has_relevance = _has_academic_relevance
+
+    def test_has_relevance_for_gene(self):
+        assert self.has_relevance("CRISPR gene editing modifies DNA")
+
+    def test_has_relevance_for_clinical(self):
+        assert self.has_relevance("the clinical trial showed efficacy")
+
+    def test_has_relevance_for_research(self):
+        assert self.has_relevance("research suggests a correlation")
+
+    def test_has_relevance_for_brain(self):
+        assert self.has_relevance("neurons in the brain fire signals")
+
+    def test_no_relevance_for_finance(self):
+        assert not self.has_relevance("Apple reported revenue of 25 billion")
+
+    def test_no_relevance_for_generic(self):
+        assert not self.has_relevance("we are well positioned for growth")
+
+    def test_relevance_for_entity_with_numbers(self):
+        """Named entity + numbers should pass (often cites research)."""
+        assert self.has_relevance("The Framingham Study tracked 5209 participants")
+
+    @patch("veritas.evidence_sources.semantic_scholar.rate_limited_get")
+    def test_search_returns_papers(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "data": [{
+                "paperId": "abc123",
+                "title": "CRISPR-Cas9 Gene Editing: A Revolution",
+                "abstract": "This paper reviews CRISPR technology.",
+                "year": 2023,
+                "venue": "Nature Reviews",
+                "citationCount": 150,
+                "url": "https://www.semanticscholar.org/paper/abc123",
+            }]
+        }
+        mock_get.return_value = mock_resp
+
+        results = self.search("CRISPR gene editing technology")
+        assert len(results) == 1
+        assert results[0]["source_name"] == "semantic_scholar"
+        assert results[0]["evidence_type"] == "paper"
+        assert "CRISPR" in results[0]["title"]
+        assert "Citations: 150" in results[0]["snippet"]
+
+    @patch("veritas.evidence_sources.semantic_scholar.rate_limited_get")
+    def test_search_returns_empty_on_failure(self, mock_get):
+        mock_get.return_value = None
+        results = self.search("CRISPR gene editing research")
+        assert results == []
+
+    def test_search_skips_irrelevant_claims(self):
+        """Finance claims should be filtered out at the relevance check."""
+        results = self.search("Apple stock price went up today")
+        assert results == []
+
+
+# ===========================================================================
+# New source routing + boost signal tests
+# ===========================================================================
+
+class TestNewSourceRouting:
+    def setup_method(self):
+        from veritas.assist import _select_sources_for_category, _smart_select_sources
+        self.select = _select_sources_for_category
+        self.smart = _smart_select_sources
+
+    def test_general_includes_all_20_sources(self):
+        sources = self.select("general")
+        names = [n for n, _ in sources]
+        assert len(names) == 20
+
+    def test_duckduckgo_in_every_category(self):
+        """DuckDuckGo should be in every category as a universal fallback."""
+        categories = ["finance", "health", "science", "politics", "tech",
+                       "labor", "education", "energy_climate", "general"]
+        for cat in categories:
+            sources = self.select(cat)
+            names = [n for n, _ in sources]
+            assert "duckduckgo" in names, f"duckduckgo missing from {cat}"
+
+    def test_wikidata_in_categories(self):
+        for cat in ["science", "politics", "tech", "general"]:
+            sources = self.select(cat)
+            names = [n for n, _ in sources]
+            assert "wikidata" in names, f"wikidata missing from {cat}"
+
+    def test_semantic_scholar_in_categories(self):
+        for cat in ["science", "health", "general"]:
+            sources = self.select(cat)
+            names = [n for n, _ in sources]
+            assert "semantic_scholar" in names, f"semantic_scholar missing from {cat}"
+
+    def test_named_entity_boosts_wikidata(self):
+        sources = self.select("general")
+        reranked = self.smart(
+            "Albert Einstein developed the theory of relativity", "general", sources
+        )
+        names = [n for n, _ in reranked]
+        assert "wikidata" in names
+        # Should be boosted near top
+        assert names.index("wikidata") <= 5
+
+    def test_academic_terms_boost_semantic_scholar(self):
+        sources = self.select("general")
+        reranked = self.smart(
+            "the clinical trial demonstrated vaccine efficacy", "general", sources
+        )
+        names = [n for n, _ in reranked]
+        assert "semantic_scholar" in names
+
+    def test_ddg_fallback_when_no_strong_signal(self):
+        sources = self.select("general")
+        reranked = self.smart(
+            "things are going well this quarter", "general", sources
+        )
+        names = [n for n, _ in reranked]
+        assert "duckduckgo" in names

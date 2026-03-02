@@ -26,9 +26,9 @@ sys.path.insert(0, "src")
 # ===========================================================================
 
 class TestSourceRegistry:
-    def test_all_sources_count_is_17(self):
+    def test_all_sources_count_is_20(self):
         from veritas.evidence_sources import ALL_SOURCES
-        assert len(ALL_SOURCES) == 17
+        assert len(ALL_SOURCES) == 20
 
     def test_local_dataset_registered_first(self):
         from veritas.evidence_sources import ALL_SOURCES

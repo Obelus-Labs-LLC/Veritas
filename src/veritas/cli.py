@@ -833,6 +833,155 @@ def inspect_verified(status: str, source_id: str, category: str, limit: int, ver
 
 
 # ──────────────────────────────────────────────────────────────────
+# build-graph (knowledge graph pipeline)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command("build-graph")
+@click.option("--threshold", default=0.40, show_default=True,
+              help="Jaccard similarity threshold for clustering (0.0-1.0).")
+def build_graph(threshold: float):
+    """Build the knowledge graph: fingerprint, cluster, and score claims across sources."""
+    from .knowledge_graph import build_knowledge_graph
+
+    console.print(f"[bold cyan]Building knowledge graph[/] (threshold={threshold})\n")
+
+    try:
+        result = build_knowledge_graph(threshold=threshold)
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        sys.exit(1)
+
+    console.print(f"[bold green]Done![/]  {result['elapsed_seconds']}s\n")
+
+    table = Table(title="Knowledge Graph Summary", show_lines=False)
+    table.add_column("Metric", width=24)
+    table.add_column("Value", width=12)
+
+    table.add_row("Total claims", str(result["total_claims"]))
+    table.add_row("Clusters found", f"[bold]{result['clusters_found']}[/]")
+    table.add_row("Claims clustered", str(result["claims_clustered"]))
+    table.add_row("Largest cluster", str(result["largest_cluster"]))
+    table.add_row("Avg cluster size", str(result["avg_cluster_size"]))
+
+    console.print(table)
+    console.print(f"\n  Run [bold]veritas clusters[/] to inspect top clusters.")
+
+
+# ──────────────────────────────────────────────────────────────────
+# clusters (list top clusters)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--limit", default=20, show_default=True, help="Max clusters to show.")
+@click.option("--by", "sort_by", default="consensus",
+              type=click.Choice(["consensus", "sources", "claims"]),
+              help="Sort clusters by metric.")
+def clusters(limit: int, sort_by: str):
+    """Show top claim clusters from the knowledge graph."""
+    from . import db as _db
+
+    results = _db.get_top_clusters(limit=limit, sort_by=sort_by)
+    if not results:
+        console.print("[yellow]No clusters found. Run `veritas build-graph` first.[/]")
+        return
+
+    console.print(f"\n[bold cyan]Claim Clusters[/] — sorted by {sort_by}\n")
+
+    table = Table(show_lines=True)
+    table.add_column("#", width=4)
+    table.add_column("ID", style="dim", width=14)
+    table.add_column("Sources", width=8, justify="right")
+    table.add_column("Claims", width=8, justify="right")
+    table.add_column("Status", width=10)
+    table.add_column("Conf.", width=6, justify="right")
+    table.add_column("Consensus", width=10, justify="right")
+    table.add_column("Cat.", width=10)
+    table.add_column("Representative Text", ratio=1)
+
+    for i, r in enumerate(results, 1):
+        status_styled = {
+            "supported": "[green]supported[/]",
+            "partial": "[yellow]partial[/]",
+            "unknown": "[dim]unknown[/]",
+        }.get(r["best_status"], r["best_status"])
+        conf = f"{r['best_confidence']:.0%}" if r["best_confidence"] > 0 else "-"
+        consensus = f"{r['consensus_score']:.0%}" if r["consensus_score"] > 0 else "-"
+        table.add_row(
+            str(i), r["id"], str(r["source_count"]), str(r["claim_count"]),
+            status_styled, conf, consensus, r["category"],
+            r["representative_text"][:80],
+        )
+
+    console.print(table)
+    console.print(f"\n  {len(results)} cluster(s) shown  |  Run [bold]veritas cluster <id>[/] for details.")
+
+
+# ──────────────────────────────────────────────────────────────────
+# cluster (detail view of a single cluster)
+# ──────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.argument("cluster_id")
+def cluster(cluster_id: str):
+    """Show detailed view of a single cluster and its member claims."""
+    from . import db as _db
+
+    cluster_data = _db.get_cluster(cluster_id)
+    if cluster_data is None:
+        console.print(f"[bold red]Error:[/] Cluster '{cluster_id}' not found.")
+        sys.exit(1)
+
+    members = _db.get_cluster_members(cluster_id)
+
+    status_styled = {
+        "supported": "[green]SUPPORTED[/]",
+        "partial": "[yellow]PARTIAL[/]",
+        "unknown": "[dim]UNKNOWN[/]",
+    }.get(cluster_data["best_status"], cluster_data["best_status"])
+
+    console.print(f"\n[bold cyan]Cluster Detail[/] — {cluster_id}")
+    console.print(f"  Representative: [italic]\"{cluster_data['representative_text'][:120]}\"[/]")
+    console.print(f"  Category: {cluster_data['category']}  |  Status: {status_styled}")
+    conf = f"{cluster_data['best_confidence']:.0%}" if cluster_data["best_confidence"] > 0 else "-"
+    consensus = f"{cluster_data['consensus_score']:.0%}" if cluster_data["consensus_score"] > 0 else "-"
+    console.print(f"  Confidence: {conf}  |  Consensus: {consensus}")
+    console.print(f"  Sources: {cluster_data['source_count']}  |  Claims: {cluster_data['claim_count']}\n")
+
+    if not members:
+        console.print("[yellow]No member claims found (data may be stale — rebuild graph).[/]")
+        return
+
+    table = Table(title="Member Claims", show_lines=True)
+    table.add_column("#", width=4)
+    table.add_column("Source", ratio=1)
+    table.add_column("Claim ID", style="dim", width=14)
+    table.add_column("Auto", width=10)
+    table.add_column("Conf.", width=6, justify="right")
+    table.add_column("Similarity", width=10, justify="right")
+    table.add_column("Claim Text", ratio=2)
+
+    for i, m in enumerate(members, 1):
+        auto_styled = {
+            "supported": "[green]supported[/]",
+            "partial": "[yellow]partial[/]",
+            "unknown": "[dim]unknown[/]",
+        }.get(m.get("status_auto", ""), m.get("status_auto", ""))
+        conf = f"{m['auto_confidence']:.0%}" if m.get("auto_confidence", 0) > 0 else "-"
+        sim = f"{m['similarity_to_rep']:.0%}" if m.get("similarity_to_rep", 0) > 0 else "-"
+        table.add_row(
+            str(i),
+            m.get("source_title", "")[:30],
+            m["claim_id"],
+            auto_styled,
+            conf,
+            sim,
+            m.get("text", "")[:100],
+        )
+
+    console.print(table)
+
+
+# ──────────────────────────────────────────────────────────────────
 # Helper
 # ──────────────────────────────────────────────────────────────────
 

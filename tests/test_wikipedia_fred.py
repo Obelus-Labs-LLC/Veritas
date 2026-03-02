@@ -150,9 +150,9 @@ def test_fred_in_all_sources():
     assert "fred" in names
 
 
-def test_all_sources_count_seventeen():
-    """Should now have 17 evidence sources total."""
-    assert len(ALL_SOURCES) == 17
+def test_all_sources_count_twenty():
+    """Should now have 20 evidence sources total."""
+    assert len(ALL_SOURCES) == 20
 
 
 # ── Routing updates ──────────────────────────────────────────────

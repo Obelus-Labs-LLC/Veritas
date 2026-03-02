@@ -306,6 +306,31 @@ def _smart_select_sources(
         if "sec_gov" in boosts:
             boosts["sec_gov"] += 8
 
+    # Signal 15: Named entities → boost wikidata (structured entity facts)
+    if len(named_entities) >= 1:
+        if "wikidata" in boosts:
+            boosts["wikidata"] += 8
+    # Historical dates (pre-2000) → wikidata is strong for historical facts
+    if re.search(r'\b(1[5-9]\d{2})\b', claim_text):
+        if "wikidata" in boosts:
+            boosts["wikidata"] += 5
+
+    # Signal 16: Academic/research terms → boost semantic_scholar
+    if acad_count >= 1:
+        if "semantic_scholar" in boosts:
+            boosts["semantic_scholar"] += 8
+    # Health + science terms also benefit from academic papers
+    if health_count >= 1:
+        if "semantic_scholar" in boosts:
+            boosts["semantic_scholar"] += 4
+
+    # Signal 17: DuckDuckGo — universal fallback for claims with no strong signal
+    # If no other source got boosted above 5, give duckduckgo a moderate boost
+    max_other_boost = max((v for k, v in boosts.items() if k != "duckduckgo"), default=0)
+    if max_other_boost < 5:
+        if "duckduckgo" in boosts:
+            boosts["duckduckgo"] += 6
+
     # Re-rank: sort by (boost descending, then preserve original order)
     indexed = [(name, fn, boosts.get(name, 0), i)
                for i, (name, fn) in enumerate(category_sources)]
@@ -326,16 +351,21 @@ def _select_sources_for_category(category: str) -> List[Tuple[str, Any]]:
     # Map categories to preferred sources
     # local_dataset is always first — zero latency, highest precision
     priority = {
-        "finance": ["local_dataset", "yfinance", "sec_edgar", "sec_gov", "fred", "bls", "cbo", "usaspending", "google_factcheck", "crossref", "wikipedia"],
-        "health": ["local_dataset", "pubmed", "openfda", "google_factcheck", "crossref", "wikipedia"],
-        "science": ["local_dataset", "arxiv", "crossref", "pubmed", "worldbank", "wikipedia"],
-        "tech": ["local_dataset", "arxiv", "crossref", "patentsview", "google_factcheck", "wikipedia"],
-        "politics": ["local_dataset", "google_factcheck", "sec_gov", "cbo", "usaspending", "crossref", "wikipedia"],
-        "military": ["local_dataset", "google_factcheck", "usaspending", "crossref", "wikipedia"],
-        "education": ["local_dataset", "census", "worldbank", "crossref", "google_factcheck", "wikipedia"],
-        "energy_climate": ["local_dataset", "worldbank", "crossref", "arxiv", "google_factcheck", "wikipedia"],
-        "labor": ["local_dataset", "bls", "fred", "census", "google_factcheck", "crossref", "wikipedia"],
-        "general": ["local_dataset", "google_factcheck", "sec_gov", "wikipedia", "crossref", "arxiv", "bls", "census"],
+        "finance": ["local_dataset", "yfinance", "sec_edgar", "sec_gov", "fred", "bls", "cbo", "usaspending", "google_factcheck", "crossref", "wikipedia", "wikidata", "duckduckgo"],
+        "health": ["local_dataset", "pubmed", "openfda", "google_factcheck", "crossref", "semantic_scholar", "wikipedia", "wikidata", "duckduckgo"],
+        "science": ["local_dataset", "arxiv", "semantic_scholar", "crossref", "pubmed", "worldbank", "wikipedia", "wikidata", "duckduckgo"],
+        "tech": ["local_dataset", "arxiv", "crossref", "patentsview", "google_factcheck", "wikipedia", "wikidata", "duckduckgo"],
+        "politics": ["local_dataset", "google_factcheck", "sec_gov", "cbo", "usaspending", "crossref", "wikipedia", "wikidata", "duckduckgo"],
+        "military": ["local_dataset", "google_factcheck", "usaspending", "crossref", "wikipedia", "wikidata", "duckduckgo"],
+        "education": ["local_dataset", "census", "worldbank", "crossref", "google_factcheck", "semantic_scholar", "wikipedia", "wikidata", "duckduckgo"],
+        "energy_climate": ["local_dataset", "worldbank", "crossref", "arxiv", "google_factcheck", "wikipedia", "wikidata", "duckduckgo"],
+        "labor": ["local_dataset", "bls", "fred", "census", "google_factcheck", "crossref", "wikipedia", "wikidata", "duckduckgo"],
+        "general": [
+            "local_dataset", "google_factcheck", "wikipedia", "crossref",
+            "arxiv", "pubmed", "sec_gov", "sec_edgar", "yfinance", "fred",
+            "openfda", "bls", "cbo", "usaspending", "census", "worldbank",
+            "patentsview", "wikidata", "duckduckgo", "semantic_scholar",
+        ],
     }
     preferred = priority.get(category, ["crossref"])
 
@@ -588,9 +618,27 @@ def assist_source(
     source = db.get_source(source_id)
     source_entity = ""
     upload_date = ""
+    source_title = ""
+    source_channel = ""
     if source:
         source_entity = infer_source_entity(source.title, source.channel)
         upload_date = source.upload_date or ""
+        source_title = source.title or ""
+        source_channel = source.channel or ""
+
+    # Re-categorise "general" claims using source context (fixes claims
+    # extracted before context-aware categorisation was added).
+    if source_title or source_channel:
+        from .claim_extract import _classify_category
+        recategorised = 0
+        for claim in claims:
+            if claim.category == "general":
+                new_cat = _classify_category(claim.text, source_title, source_channel)
+                if new_cat != "general":
+                    claim.category = new_cat
+                    recategorised += 1
+                    if not dry_run:
+                        db.update_claim_category(claim.id, new_cat)
 
     # Clear previous suggestions for this source
     if not dry_run:

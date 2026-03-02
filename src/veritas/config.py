@@ -42,5 +42,8 @@ DEFINITIVE_WORDS = frozenset([
 # Dedup similarity threshold (0-1, higher = stricter)
 DEDUP_THRESHOLD = 0.85
 
+# Knowledge graph clustering threshold (Jaccard similarity, 0-1)
+CLUSTER_THRESHOLD = 0.40
+
 # Export defaults
 DEFAULT_MAX_QUOTES = 10

@@ -88,6 +88,21 @@ class Evidence:
 
 
 @dataclass
+class ClaimCluster:
+    """Cross-source cluster: group of claims about the same fact."""
+    id: str = field(default_factory=new_id)
+    representative_text: str = ""
+    category: str = "general"
+    claim_count: int = 0
+    source_count: int = 0
+    best_status: str = "unknown"
+    best_confidence: float = 0.0
+    consensus_score: float = 0.0
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@dataclass
 class EvidenceSuggestion:
     """Auto-discovered evidence candidate (not human-verified)."""
     id: str = field(default_factory=new_id)
