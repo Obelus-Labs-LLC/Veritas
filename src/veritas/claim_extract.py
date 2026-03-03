@@ -381,6 +381,20 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
         "political", "politics", "democrat", "republicans", "democrats",
         "regulatory", "regulation", "regulations", "regulator",
         "federal", "state", "country", "countries", "nation", "nations",
+        # Diplomacy / governance
+        "diplomat", "diplomacy", "diplomatic", "ambassador", "embassy",
+        "summit", "treaty", "negotiate", "negotiation", "negotiations",
+        "sovereignty", "independence", "authoritarian", "democracy",
+        "parliament", "parliamentary", "minister", "prime minister",
+        "senator", "senators", "representative", "representatives",
+        "impeachment", "veto", "executive order",
+        # Trade / international
+        "tariff", "tariffs", "trade war", "trade deal", "embargo",
+        "sanction", "sanctions",
+        # Governance / rule
+        "regime", "dictatorship", "dictator", "coup",
+        "monarchy", "constitution", "amendment",
+        "lobbyist", "lobby", "lobbying",
     ]),
     "health": frozenset([
         "health", "healthcare", "hospital", "disease", "vaccine", "pandemic",
@@ -428,8 +442,32 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
     ]),
     "military": frozenset([
         "military", "defense", "army", "navy", "war", "weapon", "weapons",
-        "missile", "nuclear", "nato", "pentagon", "troops", "combat",
+        "missile", "missiles", "nuclear", "nato", "pentagon", "troops", "combat",
         "drone", "drones", "intelligence", "security", "sanctions",
+        # Actions / tactics
+        "attack", "attacks", "strike", "strikes", "bomb", "bombing",
+        "airstrike", "airstrikes", "invasion", "invade", "invaded",
+        "siege", "shelling", "bombardment", "retaliation", "retaliates",
+        "offensive", "counterattack", "ambush",
+        # Personnel / ranks
+        "soldier", "soldiers", "marines", "general", "commander",
+        "admiral", "colonel", "officer", "infantry",
+        # Equipment / platforms
+        "fighter", "jets", "aircraft", "carrier", "fleet", "submarine",
+        "tank", "tanks", "artillery", "warship", "warhead", "ballistic",
+        "air force", "armed forces",
+        # Outcomes
+        "casualties", "killed", "wounded", "ceasefire", "armistice",
+        "surrender", "captured", "prisoner", "prisoners",
+        # Conflicts / regions / actors
+        "iran", "israel", "iraq", "syria", "hezbollah", "hamas",
+        "taliban", "isis", "al-qaeda", "insurgent", "insurgents",
+        "rebel", "rebels", "militia", "militias",
+        # Geopolitics
+        "geopolitical", "geopolitics", "geostrategy",
+        "occupied", "occupation", "territory", "territorial",
+        "terrorism", "terrorist", "espionage", "covert",
+        "regime", "alliance", "treaty",
     ]),
     "education": frozenset([
         "education", "school", "schools", "college", "university", "universities",
