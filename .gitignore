@@ -43,3 +43,9 @@ Thumbs.db
 
 # Temp scripts (single underscore prefix, not __dunder__)
 _[!_]*.py
+
+# Logs
+*.log
+
+# Session handoff (local only — may contain architecture notes, not code)
+CLAUDE.md
