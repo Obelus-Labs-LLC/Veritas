@@ -2,7 +2,7 @@
 
 **A deterministic claim extraction and fact-verification engine.**
 
-Veritas extracts claims from audio, video, text, and PDF sources using NLP — no large language models — then verifies them against 15 official data sources using rule-based methods. Every verification is transparent, auditable, and traceable to a primary source.
+Veritas extracts claims from audio, video, text, and PDF sources using NLP — no large language models — then verifies them against 20 free structured APIs using rule-based methods. Every verification is transparent, auditable, and traceable to a primary source.
 
 > Zero LLM dependency. Zero hallucination risk. Every claim maps to evidence or stays marked unknown.
 
@@ -15,10 +15,11 @@ Veritas takes any audio, video, text, or PDF source and runs it through a fully 
 1. **Ingest** — downloads audio via yt-dlp, reads text/PDF files, or fetches web articles
 2. **Transcribe** — GPU-accelerated speech-to-text using faster-whisper (CTranslate2 / CUDA), or direct text-to-segment conversion for document intake
 3. **Extract Claims** — rule-based NLP identifies checkable factual statements from the transcript. No LLM, no prompt engineering — uses sentence boundary detection, named entity recognition, assertion verb patterns, and signal scoring
-4. **Categorize** — keyword-based classification across 10 categories routes each claim to the most relevant evidence sources
-5. **Verify** — smart routing with 13 content-aware signals sends claims to free, structured APIs. Scoring uses token overlap, entity matching, number matching, keyphrase alignment, temporal awareness, and evidence type weighting. Strict guardrails: a claim is only marked SUPPORTED when multiple scoring signals converge above threshold
+4. **Categorize** — context-aware keyword classification across 10 categories routes each claim to the most relevant evidence sources. Source metadata (title, channel) influences categorization so claims inherit context from their source
+5. **Verify** — smart routing with 13 content-aware signals sends claims to free, structured APIs. Scoring uses token overlap, entity matching, number matching, keyphrase alignment, temporal awareness, and evidence type weighting. Strict guardrails prevent false positives
+6. **Cluster** — a knowledge graph fingerprints claims, groups them by category and numeric content, then clusters related claims across sources using Union-Find with Jaccard similarity. Cross-source clusters get consensus scoring
 
-The result: a structured database of claims, each linked to candidate evidence with full scoring transparency.
+The result: a structured database of claims, each linked to candidate evidence with full scoring transparency, plus a knowledge graph showing how claims relate across sources.
 
 ---
 
@@ -36,21 +37,22 @@ Veritas takes a fundamentally different approach from LLM-based fact-checkers:
 
 | Status | Conditions |
 |--------|-----------|
-| **SUPPORTED** | Primary source + score >= 85 + keyphrase or exact number match |
-| **PARTIAL** | Score 70-84, some evidence alignment |
+| **SUPPORTED** | Score >= 65 with strong evidence alignment (keyphrase, entity, or number match) |
+| **PARTIAL** | Score >= 40, some evidence alignment |
 | **UNKNOWN** | Everything else (the honest default) |
 
-CONTRADICTED is never set automatically — too risky for an automated system.
+CONTRADICTED is never set automatically — too risky for an automated system. Finance claims have additional guardrails requiring specific financial metric matches, not just entity name overlap.
 
 ---
 
 ## Evidence Sources
 
-All free. No API keys required (except optional PatentsView key for enhanced results).
+20 free APIs. No API keys required.
 
 | Source | Type | Best For |
 |--------|------|----------|
 | **SEC EDGAR** | `filing` | Company financials, earnings, 10-K/10-Q/8-K filings |
+| **SEC Gov** | `gov` | SEC publications, reports, and regulatory documents |
 | **yfinance** | `dataset` | Real-time market data, stock prices, market cap, revenue |
 | **FRED** | `dataset` | Macroeconomic indicators — GDP, CPI, unemployment, federal funds rate |
 | **BLS** | `gov` | Labor statistics — employment, wages, CPI, PPI |
@@ -63,15 +65,19 @@ All free. No API keys required (except optional PatentsView key for enhanced res
 | **Crossref** | `paper` | Academic papers across all fields (DOI-linked) |
 | **arXiv** | `paper` | AI/ML, physics, mathematics, computer science preprints |
 | **PubMed** | `paper` | Biomedical and health research (PMID-linked) |
+| **Semantic Scholar** | `paper` | AI-curated academic search across all disciplines |
 | **Wikipedia** | `secondary` | Named entity context, background reference |
-| **Google Fact Check** | `factcheck` | Verified fact-checks from PolitiFact, Snopes, Full Fact, AFP, Reuters, and hundreds of IFCN-certified publishers worldwide |
+| **Wikidata** | `dataset` | Structured knowledge base — entities, relationships, facts |
+| **DuckDuckGo** | `search` | General web search fallback for uncategorized claims |
+| **Google Fact Check** | `factcheck` | Verified fact-checks from PolitiFact, Snopes, Full Fact, AFP, Reuters, and IFCN-certified publishers |
+| **Local Datasets** | `dataset` | Curated CSV datasets (FRED historical, corporate financials) for offline matching |
 
 ### Smart Routing
 
 Smart routing uses 13 content-aware signals to optimize source ordering per claim:
 
 - **Company mentions** boost yfinance + SEC EDGAR
-- **Academic language** boosts arXiv + Crossref
+- **Academic language** boosts arXiv + Crossref + Semantic Scholar
 - **Health/clinical terms** boost PubMed + OpenFDA
 - **Financial metrics** boost yfinance + SEC EDGAR + FRED
 - **Drug/pharmaceutical terms** boost OpenFDA
@@ -98,9 +104,21 @@ Text is converted to pseudo-segments (with synthetic timestamps) so the existing
 
 ---
 
+## Knowledge Graph
+
+Veritas clusters related claims across sources to find consensus and contradiction:
+
+- **Fingerprinting** — each claim is tokenized and numeric values extracted for comparison
+- **Blocking** — claims are grouped by category and shared numbers to reduce comparison space
+- **Clustering** — Union-Find with Jaccard similarity (0.40 threshold) groups related claims
+- **Cross-source only** — clusters require claims from different sources (same-source repeats are filtered)
+- **Consensus scoring** — clusters with 2+ sources get confidence boosts based on agreement
+
+---
+
 ## Cross-Source Intelligence
 
-Veritas doesn't just verify individual claims — it tracks how claims move across sources:
+Veritas tracks how claims move across sources:
 
 - **Spread Analysis** — identifies the same claim appearing across multiple videos or channels, scored by global content hash and fuzzy matching
 - **Timeline Tracking** — maps when claims first appear and how they propagate
@@ -109,64 +127,19 @@ Veritas doesn't just verify individual claims — it tracks how claims move acro
 
 ---
 
-## Current Stats
-
-| Metric | Value |
-|--------|-------|
-| Ingested sources | 21 |
-| Extracted claims | 3,538 |
-| Claims with evidence | 1,482 |
-| Evidence suggestions gathered | 7,409 |
-| Evidence sources | 15 |
-| Passing tests | 340 |
-| Claim categories | 10 |
-
-### Evidence Source Coverage
-
-| Source API | Evidence Found |
-|-----------|---------------|
-| Crossref | 3,152 |
-| Wikipedia | 2,452 |
-| SEC EDGAR | 946 |
-| OpenFDA | 374 |
-| arXiv | 338 |
-| PubMed | 58 |
-| PatentsView | 49 |
-| World Bank | 13 |
-| Census | 10 |
-| Google Fact Check | 8 |
-| CBO | 6 |
-| yfinance | 1 |
-| FRED | 1 |
-| BLS | 1 |
-
-### Benchmark Results
-
-| Source | Claims | Verified | Rate |
-|--------|--------|----------|------|
-| Alphabet Q4 2025 Earnings Call | 298 | 1 SUPPORTED + 8 PARTIAL | 3.0% |
-| Trump State of the Union | 249 | 2 SUPPORTED + 8 PARTIAL | 4.0% |
-| Ray Dalio: How The Economic Machine Works | 117 | 1 SUPPORTED + 4 PARTIAL | 4.3% |
-| Veritasium: Game of Life | 185 | 7 PARTIAL | 3.8% |
-| Fireship: OpenClaw | 35 | 2 PARTIAL | 5.7% |
-
-Verification rates are deliberately conservative. The scoring thresholds are strict because false positives are worse than false negatives in a verification system. A 4% auto-verification rate against free APIs with no LLM and no web scraping represents genuine evidence alignment.
-
----
-
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Python 3.9+ |
+| Language | Python 3.12+ |
 | Transcription | faster-whisper (CTranslate2, CUDA-accelerated) |
 | Audio download | yt-dlp |
 | Database | SQLite (single-file, zero-config) |
 | CLI | Click + Rich |
 | NLP | Rule-based (no external NLP libraries) |
-| Evidence APIs | requests (15 free sources, no keys required) |
+| HTTP client | httpx (async-capable, 20 free sources) |
 | GPU support | NVIDIA CUDA 12 via pip (nvidia-cublas-cu12, nvidia-cudnn-cu12) |
-| Testing | pytest (340 tests) |
+| Testing | pytest |
 
 ---
 
@@ -202,10 +175,14 @@ python veritas.py ingest-url "https://example.com/article"
 python veritas.py claims <source_id>
 python veritas.py assist <source_id>
 
+# Build the knowledge graph
+python veritas.py build-graph
+
 # Check results
 python veritas.py sources
 python veritas.py queue
 python veritas.py inspect-verified --status supported --verbose
+python veritas.py clusters
 python veritas.py export <source_id> --format md
 ```
 
@@ -220,7 +197,10 @@ python veritas.py export <source_id> --format md
 | `veritas ingest-url <url>` | Ingest a web article URL (extracts article text) |
 | `veritas transcribe <id>` | Transcribe audio with faster-whisper (GPU) |
 | `veritas claims <id>` | Extract candidate claims (deterministic, rule-based) |
-| `veritas assist <id>` | Auto-discover evidence from 15 free APIs |
+| `veritas assist <id>` | Auto-discover evidence from 20 free APIs |
+| `veritas build-graph` | Build the knowledge graph (fingerprint, cluster, consensus) |
+| `veritas clusters` | Show top claim clusters from the knowledge graph |
+| `veritas cluster <id>` | Show detailed view of a single cluster and its members |
 | `veritas queue` | Show claims needing review, sorted by priority |
 | `veritas review <id>` | Interactively review and verify claims |
 | `veritas verify <claim_id>` | Set status and attach evidence for a single claim |
@@ -257,16 +237,16 @@ Veritas uses deterministic rules — no AI, no API calls — to identify checkab
 
 | Category | Routes To |
 |----------|-----------|
-| **finance** | yfinance, SEC EDGAR, FRED, BLS, CBO, USASpending |
+| **finance** | yfinance, SEC EDGAR, FRED, BLS, CBO, USASpending, Local Datasets |
 | **health** | PubMed, OpenFDA, Google Fact Check |
-| **science** | arXiv, Crossref, PubMed |
-| **tech** | arXiv, Crossref, PatentsView |
-| **politics** | Google Fact Check, CBO, USASpending |
-| **military** | Google Fact Check, USASpending |
+| **science** | arXiv, Crossref, PubMed, Semantic Scholar |
+| **tech** | arXiv, Crossref, PatentsView, Semantic Scholar |
+| **politics** | Google Fact Check, CBO, USASpending, Wikipedia |
+| **military** | Google Fact Check, USASpending, Wikipedia |
 | **education** | Census, World Bank, Crossref |
 | **energy_climate** | World Bank, Crossref, arXiv |
 | **labor** | BLS, FRED, Census |
-| **general** | Google Fact Check, Wikipedia, Crossref, arXiv, BLS, Census |
+| **general** | DuckDuckGo, Google Fact Check, Wikipedia, Wikidata, Crossref, arXiv, BLS, Census |
 
 ---
 
@@ -289,7 +269,7 @@ pip install pytest
 pytest tests/ -v
 ```
 
-340 tests across 12 test files. Tests use fixture transcripts and mocked APIs — no network calls or GPU required.
+Tests use fixture transcripts and mocked APIs — no network calls or GPU required.
 
 ---
 
@@ -298,21 +278,26 @@ pytest tests/ -v
 ```
 veritas-app/
 ├── src/veritas/
-│   ├── cli.py              # Click CLI (17 commands)
+│   ├── cli.py              # Click CLI (21 commands)
 │   ├── ingest.py           # Audio download (yt-dlp)
 │   ├── ingest_text.py      # Text/PDF/URL document ingestion
 │   ├── transcribe.py       # Speech-to-text (faster-whisper)
 │   ├── claim_extract.py    # Deterministic claim extraction (10 categories)
 │   ├── assist.py           # Smart routing + evidence orchestration (13 signals)
 │   ├── scoring.py          # Rule-based evidence scoring (0-100)
-│   ├── evidence_sources/   # 15 free API integrations
+│   ├── knowledge_graph.py  # Fingerprinting, clustering, consensus scoring
+│   ├── evidence_sources/   # 20 free API integrations
 │   │   ├── crossref.py
 │   │   ├── arxiv.py
 │   │   ├── pubmed.py
+│   │   ├── semantic_scholar.py
 │   │   ├── sec_edgar.py
+│   │   ├── sec_gov.py
 │   │   ├── yfinance_source.py
 │   │   ├── fred_source.py
 │   │   ├── wikipedia_source.py
+│   │   ├── wikidata.py
+│   │   ├── duckduckgo.py
 │   │   ├── google_factcheck.py
 │   │   ├── openfda.py
 │   │   ├── bls.py
@@ -320,16 +305,18 @@ veritas-app/
 │   │   ├── usaspending.py
 │   │   ├── census.py
 │   │   ├── worldbank.py
-│   │   └── patentsview.py
+│   │   ├── patentsview.py
+│   │   └── local_datasets.py
 │   ├── db.py               # SQLite schema + migrations
 │   ├── models.py           # Data models
 │   ├── config.py           # Constants and paths
 │   ├── export.py           # Markdown/JSON brief generation
 │   └── search.py           # Full-text claim search
-├── tests/                  # 340 tests across 12 files
+├── tests/                  # pytest suite
 ├── data/                   # Local data (gitignored)
 │   ├── raw/                # Downloaded audio
 │   ├── transcripts/        # Whisper output
+│   ├── datasets/           # Curated CSV datasets
 │   ├── exports/            # Generated briefs
 │   └── veritas.sqlite      # Claim database
 ├── veritas.py              # Convenience runner

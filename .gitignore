@@ -16,6 +16,7 @@ env/
 data/raw/
 data/transcripts/
 data/exports/
+data/datasets/
 data/cache/
 *.sqlite
 
